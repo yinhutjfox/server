@@ -312,7 +312,7 @@ void Json_writer::add_table_name(TABLE_LIST *tab)
     str.length(0);
     ulonglong save_option_bits= thd->variables.option_bits;
     thd->variables.option_bits &= ~OPTION_QUOTE_SHOW_CREATE;
-    tab->print(current_thd, table_map(0), &str,
+    tab->print(thd, table_map(0), &str,
               enum_query_type(QT_TO_SYSTEM_CHARSET | QT_SHOW_SELECT_NUMBER
                 | QT_ITEM_IDENT_SKIP_DB_NAMES));
     thd->variables.option_bits= save_option_bits;

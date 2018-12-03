@@ -294,6 +294,7 @@ static bool find_order_in_list(THD *, Ref_ptr_array, TABLE_LIST *, ORDER *,
 static double table_cond_selectivity(JOIN *join, uint idx, JOIN_TAB *s,
                                      table_map rem_tables);
 void set_postjoin_aggr_write_func(JOIN_TAB *tab);
+static void trace_plan_prefix(JOIN *join, uint idx, table_map remaining_tables);
 #ifndef DBUG_OFF
 
 /*
@@ -6855,11 +6856,16 @@ best_access_path(JOIN      *join,
   MY_BITMAP *eq_join_set= &s->table->eq_join_set;
   KEYUSE *hj_start_key= 0;
   SplM_plan_info *spl_plan= 0;
+  Opt_trace_context *const trace = &thd->opt_trace;
+  Json_writer* writer= trace->get_current_json();
 
   disable_jbuf= disable_jbuf || idx == join->const_tables;  
 
   Loose_scan_opt loose_scan_opt;
   DBUG_ENTER("best_access_path");
+
+  Json_writer_object trace_wrapper(writer, "best_access_path");
+  Json_writer_array trace_paths(writer, "considered_access_paths");
   
   bitmap_clear_all(eq_join_set);
 
@@ -7594,6 +7600,8 @@ choose_plan(JOIN *join, table_map join_tables)
   join->cur_embedding_map= 0;
   reset_nj_counters(join, join->join_list);
   qsort2_cmp jtab_sort_func;
+  Opt_trace_context* const trace= &join->thd->opt_trace;
+  Json_writer* writer= trace->get_current_json();
 
   if (join->emb_sjm_nest)
   {
@@ -7624,6 +7632,9 @@ choose_plan(JOIN *join, table_map join_tables)
   my_qsort2(join->best_ref + join->const_tables,
             join->table_count - join->const_tables, sizeof(JOIN_TAB*),
             jtab_sort_func, (void*)join->emb_sjm_nest);
+
+  Json_writer_object wrapper(writer);
+  Json_writer_array trace_plan(writer,"considered_execution_plans");
 
   if (!join->emb_sjm_nest)
   {
@@ -8649,6 +8660,31 @@ double table_cond_selectivity(JOIN *join, uint idx, JOIN_TAB *s,
 }
 
 
+static void trace_plan_prefix(JOIN *join, uint idx, table_map remaining_tables)
+{
+  THD *const thd = join->thd;
+  Opt_trace_context* const trace= &thd->opt_trace;
+  Json_writer* writer= trace->get_current_json();
+  Json_writer_array plan_prefix(writer, "plan_prefix");
+  ulonglong save_option_bits= thd->variables.option_bits;
+  thd->variables.option_bits &= ~OPTION_QUOTE_SHOW_CREATE;
+  for (uint i = 0; i < idx; i++)
+  {
+    TABLE_LIST *const tr = join->positions[i].table->tab_list;
+    if (!(tr->map & remaining_tables))
+    {
+      char buff[1024];
+      String str(buff, sizeof(buff), system_charset_info);
+      str.length(0);
+      tr->print(thd, table_map(0), &str,
+              enum_query_type(QT_TO_SYSTEM_CHARSET | QT_SHOW_SELECT_NUMBER
+                | QT_ITEM_IDENT_SKIP_DB_NAMES));;
+      plan_prefix.get_value_context().add_str(str.ptr(), str.length());
+    }
+  }
+  thd->variables.option_bits= save_option_bits;
+}
+
 /**
   Find a good, possibly optimal, query execution plan (QEP) by a possibly
   exhaustive search.
@@ -8803,6 +8839,8 @@ best_extension_by_limited_search(JOIN      *join,
   double best_record_count= DBL_MAX;
   double best_read_time=    DBL_MAX;
   bool disable_jbuf= join->thd->variables.join_cache_level == 0;
+  Opt_trace_context* const trace= &thd->opt_trace;
+  Json_writer* writer= trace->get_current_json();
 
   DBUG_EXECUTE("opt", print_plan(join, idx, record_count, read_time, read_time,
                                 "part_plan"););
@@ -8826,6 +8864,13 @@ best_extension_by_limited_search(JOIN      *join,
       double current_record_count, current_read_time;
       POSITION *position= join->positions + idx;
 
+      Json_writer_object trace_one_table(writer);
+      if (unlikely(trace->get_current_trace()))
+      {
+        trace_plan_prefix(join, idx, remaining_tables);
+        trace_one_table.add_member("table").add_table_name(s->tab_list);
+      }
+
       /* Find the best access method from 's' to the current partial plan */
       POSITION loose_scan_pos;
       best_access_path(join, s, remaining_tables, idx, disable_jbuf,
@@ -8839,6 +8884,13 @@ best_extension_by_limited_search(JOIN      *join,
       current_read_time=read_time + position->read_time +
                         current_record_count / (double) TIME_FOR_COMPARE;
 
+      trace_one_table.add_member("condition_filtering_pct")
+                 .add_str("need to calculate");
+      trace_one_table.add_member("rows_for_plan")
+                     .add_double(current_record_count);
+      trace_one_table.add_member("cost_for_plan")
+                     .add_double(current_read_time);
+
       advance_sj_state(join, remaining_tables, idx, &current_record_count,
                        &current_read_time, &loose_scan_pos);
 
@@ -8850,6 +8902,7 @@ best_extension_by_limited_search(JOIN      *join,
                                        read_time,
                                        current_read_time,
                                        "prune_by_cost"););
+        trace_one_table.add_member("pruned_by_cost").add_bool(true);
         restore_prev_nj_state(s);
         restore_prev_sj_state(remaining_tables, s, idx);
         continue;
@@ -8883,6 +8936,7 @@ best_extension_by_limited_search(JOIN      *join,
                                          read_time,
                                          current_read_time,
                                          "pruned_by_heuristic"););
+          trace_one_table.add_member("pruned_by_heuristic").add_bool(true);
           restore_prev_nj_state(s);
           restore_prev_sj_state(remaining_tables, s, idx);
           continue;
@@ -8900,6 +8954,7 @@ best_extension_by_limited_search(JOIN      *join,
       if ( (search_depth > 1) && (remaining_tables & ~real_table_bit) & allowed_tables )
       { /* Recursively expand the current partial plan */
         swap_variables(JOIN_TAB*, join->best_ref[idx], *pos);
+        Json_writer_array trace_rest(writer, "rest_of_plan");
         if (best_extension_by_limited_search(join,
                                              remaining_tables & ~real_table_bit,
                                              idx + 1,
