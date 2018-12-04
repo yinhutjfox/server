@@ -6858,6 +6858,7 @@ best_access_path(JOIN      *join,
   SplM_plan_info *spl_plan= 0;
   Opt_trace_context *const trace = &thd->opt_trace;
   Json_writer* writer= trace->get_current_json();
+  const char* cause= NULL;
 
   disable_jbuf= disable_jbuf || idx == join->const_tables;  
 
@@ -6980,6 +6981,7 @@ best_access_path(JOIN      *join,
       if (rec < MATCHING_ROWS_IN_OTHER_TABLE)
         rec= MATCHING_ROWS_IN_OTHER_TABLE;      // Fix for small tables
 
+      Json_writer_object trace_access_idx(writer);
       /*
         ft-keys require special treatment
       */
@@ -6991,6 +6993,8 @@ best_access_path(JOIN      *join,
         */
         tmp= prev_record_reads(join->positions, idx, found_ref);
         records= 1.0;
+        trace_access_idx.add_member("access_type").add_str("fulltext");
+        trace_access_idx.add_member("index").add_str(keyinfo->name);
       }
       else
       {
@@ -7005,11 +7009,15 @@ best_access_path(JOIN      *join,
           if ((key_flags & (HA_NOSAME | HA_NULL_PART_KEY)) == HA_NOSAME ||
               MY_TEST(key_flags & HA_EXT_NOSAME))
           {
+            trace_access_idx.add_member("access_type").add_str("eq_ref");
+            trace_access_idx.add_member("index").add_str(keyinfo->name);
             tmp = prev_record_reads(join->positions, idx, found_ref);
             records=1.0;
           }
           else
           {
+            trace_access_idx.add_member("access_type").add_str("ref");
+            trace_access_idx.add_member("index").add_str(keyinfo->name);
             if (!found_ref)
             {                                     /* We found a const key */
               /*
@@ -7030,11 +7038,19 @@ best_access_path(JOIN      *join,
                 empty interval we wouldn't have got here).
               */
               if (table->quick_keys.is_set(key))
+              {
                 records= (double) table->quick_rows[key];
+                trace_access_idx.add_member("used_range_estimates")
+                                .add_bool(true);
+              }
               else
               {
                 /* quick_range couldn't use key! */
                 records= (double) s->records/rec;
+                trace_access_idx.add_member("used_range_estimates")
+                                .add_bool(false);
+                trace_access_idx.add_member("cause")
+                                .add_str("not_available");
               }
             }
             else
@@ -7066,7 +7082,27 @@ best_access_path(JOIN      *join,
                   table->quick_n_ranges[key] == 1 &&
                   records > (double) table->quick_rows[key])
               {
+
                 records= (double) table->quick_rows[key];
+                trace_access_idx.add_member("used_range_estimates")
+                                .add_bool(true);
+              }
+              else
+              {
+                if (table->quick_keys.is_set(key))
+                {
+                  trace_access_idx.add_member("used_range_estimates")
+                                  .add_bool(false);
+                  trace_access_idx.add_member("cause")
+                                  .add_str("not_better_than_ref_estimates");
+                }
+                else
+                {
+                  trace_access_idx.add_member("used_range_estimates")
+                                  .add_bool(false);
+                  trace_access_idx.add_member("cause")
+                                  .add_str("not_available");
+                }
               }
             }
             /* Limit the number of matched rows */
@@ -7082,6 +7118,9 @@ best_access_path(JOIN      *join,
         }
         else
         {
+          trace_access_idx.add_member("access_type")
+                          .add_str(ref_or_null_part ? "ref_or_null" : "ref");
+          trace_access_idx.add_member("index").add_str(keyinfo->name);
           /*
             Use as much key-parts as possible and a uniq key is better
             than a not unique key
@@ -7136,6 +7175,8 @@ best_access_path(JOIN      *join,
                 table->quick_n_ranges[key] == 1 + MY_TEST(ref_or_null_part)) //(C3)
             {
               tmp= records= (double) table->quick_rows[key];
+              trace_access_idx.add_member("used_range_estimates")
+                              .add_bool(true);
             }
             else
             {
@@ -7161,7 +7202,20 @@ best_access_path(JOIN      *join,
                 if (!found_ref && table->quick_keys.is_set(key) &&    // (1)
                     table->quick_key_parts[key] > max_key_part &&     // (2)
                     records < (double)table->quick_rows[key])         // (3)
+                {
+                  trace_access_idx.add_member("used_range_estimates")
+                                  .add_bool(true);
                   records= (double)table->quick_rows[key];
+                }
+                else
+                {
+                  if (table->quick_keys.is_set(key) &&
+                      table->quick_key_parts[key] < max_key_part)
+                  {
+                    trace_access_idx.add_member("chosen").add_bool(false);
+                    cause= "range_uses_more_keyparts";
+                  }
+                }
 
                 tmp= records;
               }
@@ -7245,22 +7299,37 @@ best_access_path(JOIN      *join,
             tmp*= record_count;
           }
           else
+          {
+            if (!(found_part & 1))
+              cause= "no predicate for first keypart";
             tmp= best_time;                    // Do nothing
+          }
         }
 
         tmp += s->startup_cost;
         loose_scan_opt.check_ref_access_part2(key, start_key, records, tmp);
       } /* not ft_key */
 
+      double cur_ref_cost= tmp + records/(double) TIME_FOR_COMPARE;
+      trace_access_idx.add_member("rows").add_double(records);
+      trace_access_idx.add_member("cost").add_double(cur_ref_cost);
+
       if (tmp + 0.0001 < best_time - records/(double) TIME_FOR_COMPARE)
       {
-        best_time= tmp + records/(double) TIME_FOR_COMPARE;
+        trace_access_idx.add_member("chosen").add_bool(true);
+        best_time= cur_ref_cost;
         best= tmp;
         best_records= records;
         best_key= start_key;
         best_max_key_part= max_key_part;
         best_ref_depends_map= found_ref;
       }
+      else
+      {
+        trace_access_idx.add_member("chosen").add_bool(false);
+        trace_access_idx.add_member("cause").add_str(cause ? cause : "cost");
+      }
+      cause= NULL;
     } /* for each key */
     records= best_records;
   }
@@ -7282,6 +7351,7 @@ best_access_path(JOIN      *join,
       (!(s->table->map & join->outer_join) ||
        join->allowed_outer_join_with_cache))    // (2)
   {
+    Json_writer_object trace_access_hash(writer);
     double join_sel= 0.1;
     /* Estimate the cost of  the hash join access to the table */
     double rnd_records= matching_candidates_in_table(s, found_constraint,
@@ -7301,7 +7371,12 @@ best_access_path(JOIN      *join,
     best_key= hj_start_key;
     best_ref_depends_map= 0;
     best_uses_jbuf= TRUE;
-   }
+    trace_access_hash.add_member("type").add_str("hash");
+    trace_access_hash.add_member("index").add_str("hj-key");
+    trace_access_hash.add_member("cost").add_double(rnd_records);
+    trace_access_hash.add_member("cost").add_double(best_time);
+    trace_access_hash.add_member("chosen").add_bool(true);
+  }
 
   /*
     Don't test table scan if it can't be better.
@@ -7336,6 +7411,7 @@ best_access_path(JOIN      *join,
         can be [considered to be] more expensive, which causes lookups not to 
         be used for cases with small datasets, which is annoying.
   */
+  Json_writer_object trace_access_scan(writer);
   if ((records >= s->found_records || best > s->read_time) &&            // (1)
       !(s->quick && best_key && s->quick->index == best_key->key &&      // (2)
         best_max_key_part >= s->table->quick_key_parts[best_key->key]) &&// (2)
@@ -7355,6 +7431,10 @@ best_access_path(JOIN      *join,
 
     if (s->quick)
     {
+      trace_access_scan.add_member("access_type").add_str("range");
+      /*
+        should have some info about all the different QUICK_SELECT
+      */
       /*
         For each record we:
         - read record range through 'quick'
@@ -7372,6 +7452,7 @@ best_access_path(JOIN      *join,
     }
     else
     {
+      trace_access_scan.add_member("access_type").add_str("scan");
       /* Estimate cost of reading table. */
       if (s->table->force_index && !best_key) // index scan
         tmp= s->table->file->read_time(s->ref.key, 1, s->records);
@@ -7416,6 +7497,10 @@ best_access_path(JOIN      *join,
       as record_count * rnd_records / TIME_FOR_COMPARE. This cost plus
       tmp give us total cost of using TABLE SCAN
     */
+    trace_access_scan.add_member("resulting_rows")
+                     .add_double(rnd_records);
+    trace_access_scan.add_member("cost")
+                     .add_double(tmp);
     if (best == DBL_MAX ||
         (tmp  + record_count/(double) TIME_FOR_COMPARE*rnd_records <
          (best_key->is_for_hash_join() ? best_time :
@@ -7434,6 +7519,13 @@ best_access_path(JOIN      *join,
                                                   join->outer_join)));
       spl_plan= 0;
     }
+    trace_access_scan.add_member("chosen").add_bool(best_key == NULL);
+  }
+  else
+  {
+    trace_access_scan.add_member("type").add_str("scan");
+    trace_access_scan.add_member("chosen").add_bool("false");
+    trace_access_scan.add_member("cause").add_str("cost");
   }
 
   /* Update the cost information for the current partial plan */
@@ -7452,7 +7544,10 @@ best_access_path(JOIN      *join,
       idx == join->const_tables &&
       s->table == join->sort_by_table &&
       join->unit->select_limit_cnt >= records)
+  {
+    trace_access_scan.add_member("use_tmp_table").add_bool(true);
     join->sort_by_table= (TABLE*) 1;  // Must use temporary table
+  }
 
   DBUG_VOID_RETURN;
 }

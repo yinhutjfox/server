@@ -2684,8 +2684,6 @@ int SQL_SELECT::test_quick_select(THD *thd, key_map keys_to_use,
 
   Opt_trace_context *const trace = &thd->opt_trace;
   Json_writer* writer= trace->get_current_json();
-  Json_writer_object rows_estimation_tracer(writer);
-  Json_writer_array rows_estimation(writer, "rows_estimation");
   Json_writer_object table_records(writer);
   table_records.add_member("table").add_table_name(head->pos_in_table_list);
   Json_writer_object trace_range(writer, "range_analysis");
