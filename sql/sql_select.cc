@@ -10628,6 +10628,8 @@ make_join_select(JOIN *join,SQL_SELECT *select,COND *cond)
 {
   THD *thd= join->thd;
   DBUG_ENTER("make_join_select");
+  Opt_trace_context* const trace= &thd->opt_trace;
+  Json_writer* writer= trace->get_current_json();
   if (select)
   {
     add_not_null_conds(join);
@@ -10651,23 +10653,40 @@ make_join_select(JOIN *join,SQL_SELECT *select,COND *cond)
            there inside the triggers.
       */
       {						// Check const tables
-        join->exec_const_cond=
-	  make_cond_for_table(thd, cond,
+        Item* const_cond= NULL;
+        const_cond= make_cond_for_table(thd, cond,
                               join->const_table_map,
                               (table_map) 0, -1, FALSE, FALSE);
         /* Add conditions added by add_not_null_conds(). */
         for (uint i= 0 ; i < join->const_tables ; i++)
-          add_cond_and_fix(thd, &join->exec_const_cond,
+          add_cond_and_fix(thd, const_cond,
                            join->join_tab[i].select_cond);
 
-        DBUG_EXECUTE("where",print_where(join->exec_const_cond,"constants",
+        DBUG_EXECUTE("where",print_where(const_cond,"constants",
 					 QT_ORDINARY););
-        if (join->exec_const_cond && !join->exec_const_cond->is_expensive() &&
-            !join->exec_const_cond->val_int())
+
+        if (const_cond)
         {
-          DBUG_PRINT("info",("Found impossible WHERE condition"));
-          join->exec_const_cond= NULL;
-          DBUG_RETURN(1);	 // Impossible const condition
+          Json_writer_object trace_const_cond(writer);
+          trace_const_cond.add_member("condition_on_constant_tables")
+                          .add_str(const_cond);
+          if (const_cond->is_expensive())
+          {
+            trace_const_cond.add_member("evalualted").add_str("false");
+            trace_const_cond.add_member("cause").add_str("expensive_cond");
+          }
+          else
+          {
+            const bool const_cond_result = const_cond->val_int() != 0;
+            trace_const_cond.add("condition_on_constant_tables", const_cond)
+            if (!const_cond_result)
+            {
+              DBUG_PRINT("info",("Found impossible WHERE condition"));
+              join->exec_const_cond= NULL;
+              DBUG_RETURN(1);
+            }
+          }
+          join->exec_const_cond= const_cond;
         }
 
         if (join->table_count != join->const_tables)
