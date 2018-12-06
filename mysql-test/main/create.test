@@ -802,19 +802,17 @@ create table if not exists t2 select * from t1;
 unlock tables;
 create table t2 (j int);
 lock tables t1 read;
---error ER_TABLE_NOT_LOCKED
+--error ER_TABLE_EXISTS_ERROR
 create table t2 select * from t1;
 # This should not be ever allowed as it will undermine
 # lock-all-at-once approach
---error ER_TABLE_NOT_LOCKED
 create table if not exists t2 select * from t1;
 unlock tables;
 lock table t1 read, t2 read;
---error ER_TABLE_NOT_LOCKED_FOR_WRITE
+--error ER_TABLE_EXISTS_ERROR
 create table t2 select * from t1;
 --error ER_TABLE_NOT_LOCKED
 create table t3 select * from t1;
---error ER_TABLE_NOT_LOCKED_FOR_WRITE
 create table if not exists t2 select * from t1;
 --error ER_TABLE_NOT_LOCKED
 create table if not exists t3 select * from t1;
