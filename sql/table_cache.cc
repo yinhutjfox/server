@@ -1094,6 +1094,7 @@ bool tdc_remove_table(THD *thd, enum_tdc_remove_table_type remove_type,
   TABLE *table;
   TDC_element *element;
   uint my_refs= 1;
+  bool res= false;
   DBUG_ENTER("tdc_remove_table");
   DBUG_PRINT("enter",("name: %s  remove_type: %d", table_name, remove_type));
 
@@ -1122,7 +1123,7 @@ bool tdc_remove_table(THD *thd, enum_tdc_remove_table_type remove_type,
     mysql_mutex_unlock(&LOCK_unused_shares);
 
     tdc_delete_share_from_hash(element);
-    DBUG_RETURN(true);
+    DBUG_RETURN(false);
   }
   mysql_mutex_unlock(&LOCK_unused_shares);
 
@@ -1188,10 +1189,16 @@ bool tdc_remove_table(THD *thd, enum_tdc_remove_table_type remove_type,
 #endif
     mysql_mutex_unlock(&element->LOCK_table_share);
   }
+  else
+  {
+    mysql_mutex_lock(&element->LOCK_table_share);
+    res= element->ref_count > 1;
+    mysql_mutex_unlock(&element->LOCK_table_share);
+  }
 
   tdc_release_share(element->share);
 
-  DBUG_RETURN(true);
+  DBUG_RETURN(res);
 }
 
 
