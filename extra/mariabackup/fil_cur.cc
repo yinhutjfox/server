@@ -257,6 +257,31 @@ xb_fil_cur_open(
 	return(XB_FIL_CUR_SUCCESS);
 }
 
+/** Print retry logic if the page is corrupted.
+@param[in]	retry_count	number of retry happened
+@param[in]	thread_n	thread number
+@param[in]	page_no		page number to be read
+@param[in]	abs_path	absolute file path */
+static void xb_print_retry_logic(
+	ulint	retry_count,
+	uint	thread_n,
+	ulint	page_no,
+	char*	abs_path)
+{
+	if (retry_count == 0) {
+		msg("[%02u] mariabackup: "
+		    "Error: failed to read page after "
+		    "10 retries. File %s seems to be "
+		    "corrupted.\n", thread_n, abs_path);
+	}
+
+	if (retry_count == 9) {
+		msg("[%02u] mariabackup: "
+		    "Database page corruption detected at page "
+		    ULINTPF ", retrying...\n", thread_n, page_no);
+	}
+}
+
 /************************************************************************
 Reads and verifies the next block of pages from the source
 file. Positions the cursor after the last read non-corrupted page.
@@ -277,6 +302,10 @@ xb_fil_cur_read(
 	ib_int64_t		offset;
 	ib_int64_t		to_read;
 	const ulint		page_size = cursor->page_size.physical();
+	fil_space_t*		encrypted_space = NULL;
+	bool			encrypted = false;
+	static byte		tmp_frame[UNIV_PAGE_SIZE_MAX];
+
 	xb_ad(!cursor->is_system() || page_size == UNIV_PAGE_SIZE);
 
 	cursor->read_filter->get_next_batch(&cursor->read_filter_ctxt,
@@ -336,6 +365,10 @@ read_retry:
 			       cursor->file, cursor->buf, offset,
 			       (ulint) to_read);
 	if (!success) {
+		if (encrypted_space != NULL) {
+			fil_space_release_for_io(encrypted_space);
+		}
+
 		return(XB_FIL_CUR_ERROR);
 	}
 
@@ -349,27 +382,64 @@ read_retry:
                     page_no >= FSP_EXTENT_SIZE &&
                     page_no < FSP_EXTENT_SIZE * 3) {
                         /* We ignore the doublewrite buffer pages */
-                } else if (!fil_space_verify_crypt_checksum(
-                                   page, cursor->page_size, space->id, page_no)
-                           && buf_page_is_corrupted(true, page,
-                                                    cursor->page_size,
-                                                    space)) {
+		} else if (fil_space_verify_crypt_checksum(
+				page, cursor->page_size, space->id, page_no)) {
+
+			ut_ad(mach_read_from_4(page + FIL_PAGE_SPACE_ID)
+			      == space->id);
+
+			bool decrypted = false;
+
+			if (!encrypted) {
+				encrypted_space = fil_space_acquire_for_io(
+							space->id);
+				encrypted = true;
+			}
+
+			if (encrypted_space->crypt_data == NULL) {
+				byte	page0[UNIV_PAGE_SIZE_MAX];
+				os_file_read(
+					IORequestRead, cursor->file,
+					page0, 0, page_size);
+
+				mutex_enter(&fil_system->mutex);
+				encrypted_space->crypt_data =
+					fil_space_read_crypt_data(
+						cursor->page_size, page0);
+				mutex_exit(&fil_system->mutex);
+			}
+
+			if (!fil_space_decrypt(
+				encrypted_space, tmp_frame, page, &decrypted)
+			    || buf_page_is_corrupted(
+				true, tmp_frame, cursor->page_size, space)) {
+
+				retry_count--;
+
+				xb_print_retry_logic(
+					retry_count, cursor->thread_n,
+					page_no, cursor->abs_path);
+
+				if (retry_count == 0) {
+					ret = XB_FIL_CUR_ERROR;
+					break;
+				}
+
+				os_thread_sleep(100000);
+				goto read_retry;
+			}
+
+		} else if (buf_page_is_corrupted(true, page, cursor->page_size,
+						 space)) {
                         retry_count--;
+
+			xb_print_retry_logic(
+				retry_count, cursor->thread_n,
+				page_no, cursor->abs_path);
+
                         if (retry_count == 0) {
-                                msg("[%02u] mariabackup: "
-                                    "Error: failed to read page after "
-                                    "10 retries. File %s seems to be "
-                                    "corrupted.\n", cursor->thread_n,
-                                    cursor->abs_path);
                                 ret = XB_FIL_CUR_ERROR;
                                 break;
-                        }
-
-                        if (retry_count == 9) {
-                                msg("[%02u] mariabackup: "
-                                    "Database page corruption detected at page "
-                                    ULINTPF ", retrying...\n",
-                                    cursor->thread_n, page_no);
                         }
 
                         os_thread_sleep(100000);
@@ -378,6 +448,10 @@ read_retry:
                 }
                 cursor->buf_read += page_size;
                 cursor->buf_npages++;
+	}
+
+	if (encrypted_space != NULL) {
+		fil_space_release_for_io(encrypted_space);
 	}
 
 	posix_fadvise(cursor->file, offset, to_read, POSIX_FADV_DONTNEED);
