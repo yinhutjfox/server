@@ -305,6 +305,7 @@ xb_fil_cur_read(
 	fil_space_t*		encrypted_space = NULL;
 	bool			encrypted = false;
 	static byte		tmp_frame[UNIV_PAGE_SIZE_MAX];
+	static byte		tmp_page[UNIV_PAGE_SIZE_MAX];
 
 	xb_ad(!cursor->is_system() || page_size == UNIV_PAGE_SIZE);
 
@@ -409,10 +410,12 @@ read_retry:
 				mutex_exit(&fil_system->mutex);
 			}
 
+			memcpy(tmp_page, page, page_size);
+
 			if (!fil_space_decrypt(
-				encrypted_space, tmp_frame, page, &decrypted)
+				encrypted_space, tmp_frame, tmp_page, &decrypted)
 			    || buf_page_is_corrupted(
-				true, tmp_frame, cursor->page_size, space)) {
+				true, tmp_page, cursor->page_size, space)) {
 
 				retry_count--;
 
