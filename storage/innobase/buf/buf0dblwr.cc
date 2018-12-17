@@ -556,6 +556,8 @@ buf_dblwr_process()
 
 		const bool is_all_zero = buf_page_is_zeroes(
 			read_buf, zip_size);
+		ulint	kv = mach_read_from_4(
+			read_buf + FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION);
 
 		if (is_all_zero) {
 			/* We will check if the copy in the
@@ -570,10 +572,10 @@ buf_dblwr_process()
 				goto bad;
 			}
 
-			if (fil_space_verify_crypt_checksum(
-				    read_buf, zip_size, NULL, page_no)
+			if ((kv > 0 && fil_space_verify_crypt_checksum(
+					read_buf, zip_size, NULL, page_no))
 			    || !buf_page_is_corrupted(
-				    true, read_buf, zip_size, space())) {
+					true, read_buf, zip_size, space())) {
 				/* The page is good; there is no need
 				to consult the doublewrite buffer. */
 				continue;
@@ -592,8 +594,9 @@ bad:
 		if (!decomp || (decomp != srv_page_size && zip_size)) {
 			goto bad_doublewrite;
 		}
-		if (!fil_space_verify_crypt_checksum(page, zip_size, NULL,
-						     page_no)
+
+		if ((kv == 0 || !fil_space_verify_crypt_checksum(
+					page, zip_size, NULL, page_no))
 		    && buf_page_is_corrupted(true, page, zip_size, space)) {
 			if (!is_all_zero) {
 bad_doublewrite:

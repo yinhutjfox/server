@@ -4797,11 +4797,17 @@ buf_page_check_corrupt(buf_page_t* bpage, fil_space_t* space)
 	not decrypted and it could be either encrypted and corrupted
 	or corrupted or good page. If we decrypted, there page could
 	still be corrupted if used key does not match. */
-	still_encrypted = (crypt_data &&
-		crypt_data->type != CRYPT_SCHEME_UNENCRYPTED &&
-		!bpage->encrypted &&
-		fil_space_verify_crypt_checksum(dst_frame, zip_size,
-			space, bpage->offset));
+	if (mach_read_from_4(
+		dst_frame + FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION) == 0) {
+		still_encrypted = false;
+	} else {
+		still_encrypted = (crypt_data &&
+				   crypt_data->type != CRYPT_SCHEME_UNENCRYPTED &&
+				   !bpage->encrypted &&
+				   fil_space_verify_crypt_checksum(
+					dst_frame, zip_size,
+					space, bpage->offset));
+	}
 
 	if (!still_encrypted) {
 		/* If traditional checksums match, we assume that page is

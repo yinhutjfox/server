@@ -2585,10 +2585,7 @@ fil_space_verify_crypt_checksum(
 {
 	uint key_version = mach_read_from_4(page+ FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION);
 
-	/* If page is not encrypted, return false */
-	if (key_version == 0) {
-		return(false);
-	}
+	ut_ad(key_version);
 
 	srv_checksum_algorithm_t algorithm =
 			static_cast<srv_checksum_algorithm_t>(srv_checksum_algorithm);
