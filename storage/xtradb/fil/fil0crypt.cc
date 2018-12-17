@@ -2639,6 +2639,23 @@ fil_space_verify_crypt_checksum(
 	bool encrypted = (checksum == cchecksum1 || checksum == cchecksum2
 		|| checksum == BUF_NO_CHECKSUM_MAGIC);
 
+#ifndef UNIV_INNOCHECKSUM
+	if (space == NULL) {
+		ib_uint32_t	space_id = mach_read_from_4(
+				page + FIL_PAGE_SPACE_ID);
+		mutex_enter(&fil_system->mutex);
+		space = fil_space_get_by_id(space_id);
+		mutex_exit(&fil_system->mutex);
+	}
+
+	if (space != NULL
+	    && space->crypt_data != NULL
+	    && space->crypt_data->type == CRYPT_SCHEME_1
+	    && encrypted) {
+		return encrypted;
+	}
+#endif /* UNIV_INNOCHECKSUM */
+
 	/* MySQL 5.6 and MariaDB 10.0 and 10.1 will write an LSN to the
 	first page of each system tablespace file at
 	FIL_PAGE_FILE_FLUSH_LSN offset. On other pages and in other files,
