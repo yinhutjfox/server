@@ -4963,10 +4963,7 @@ int create_table_impl(THD *thd,
                                                  false);
 
     if (!table)
-    {
-      (void) thd->rm_temporary_table(create_info->db_type, path);
       goto err;
-    }
 
     if (is_trans != NULL)
       *is_trans= table->file->has_transactions();

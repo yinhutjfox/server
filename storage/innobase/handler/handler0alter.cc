@@ -197,10 +197,9 @@ inline void dict_table_t::init_instant(const dict_table_t& table)
 		if (!f.col->is_nullable()) {
 			field_map_it->set_not_null();
 		}
-		field_map_it->set_ind(fixed_len
-				      ? uint16_t(fixed_len + 1)
-				      : f.col->len > 255);
-		field_map_it++;
+		field_map_it++->set_ind(fixed_len
+					? uint16_t(fixed_len + 1)
+					: f.col->len > 255);
 		ut_ad(f.col >= table.instant->dropped);
 		ut_ad(f.col < table.instant->dropped
 		      + table.instant->n_dropped);
