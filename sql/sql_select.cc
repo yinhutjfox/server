@@ -8979,8 +8979,9 @@ best_extension_by_limited_search(JOIN      *join,
       current_read_time=read_time + position->read_time +
                         current_record_count / (double) TIME_FOR_COMPARE;
 
-      trace_one_table.add_member("condition_filtering_pct")
-                 .add_str("need to calculate");
+      /*
+        TODO add filtering estimates here
+      */
       trace_one_table.add_member("rows_for_plan")
                      .add_double(current_record_count);
       trace_one_table.add_member("cost_for_plan")
@@ -10659,7 +10660,7 @@ make_join_select(JOIN *join,SQL_SELECT *select,COND *cond)
                               (table_map) 0, -1, FALSE, FALSE);
         /* Add conditions added by add_not_null_conds(). */
         for (uint i= 0 ; i < join->const_tables ; i++)
-          add_cond_and_fix(thd, const_cond,
+          add_cond_and_fix(thd, &const_cond,
                            join->join_tab[i].select_cond);
 
         DBUG_EXECUTE("where",print_where(const_cond,"constants",
@@ -10678,7 +10679,8 @@ make_join_select(JOIN *join,SQL_SELECT *select,COND *cond)
           else
           {
             const bool const_cond_result = const_cond->val_int() != 0;
-            trace_const_cond.add("condition_on_constant_tables", const_cond)
+            trace_const_cond.add_member("condition_on_constant_tables")
+                            .add_str(const_cond);
             if (!const_cond_result)
             {
               DBUG_PRINT("info",("Found impossible WHERE condition"));
@@ -10723,6 +10725,11 @@ make_join_select(JOIN *join,SQL_SELECT *select,COND *cond)
     /*
       Step #2: Extract WHERE/ON parts
     */
+    Json_writer_object trace_wrapper(writer);
+    Json_writer_object trace_conditions(writer, "attaching_conditions_to_tables");
+    trace_conditions.add_member("original_condition").add_str(cond);
+    Json_writer_array trace_attached_comp(writer,
+                                        "attached_conditions_computation");
     uint i;
     for (i= join->top_join_tab_count - 1; i >= join->const_tables; i--)
     {
@@ -10785,10 +10792,19 @@ make_join_select(JOIN *join,SQL_SELECT *select,COND *cond)
            (!is_hash_join_key_no(tab->ref.key) &&
             tab->table->intersect_keys.is_set(tab->ref.key))))
       {
-	/* Range uses longer key;  Use this instead of ref on key */
-	tab->type=JT_ALL;
-	use_quick_range=1;
-	tab->use_quick=1;
+        /* Range uses longer key;  Use this instead of ref on key */
+
+        /*
+          We can trace here, changing ref access to range access here
+          have a range that uses longer key.
+          Lets take @spetrunia's opinion
+        */
+        Json_writer_object ref_to_range(writer);
+        ref_to_range.add_member("ref_to_range").add_bool(true);
+        ref_to_range.add_member("cause").add_str("range_uses_longer_key");
+        tab->type=JT_ALL;
+        use_quick_range=1;
+        tab->use_quick=1;
         tab->ref.key= -1;
 	tab->ref.key_parts=0;		// Don't use ref key.
 	join->best_positions[i].records_read= rows2double(tab->quick->records);
@@ -11225,6 +11241,20 @@ make_join_select(JOIN *join,SQL_SELECT *select,COND *cond)
       }
       if (!tab->bush_children)
         i++;
+    }
+
+    trace_attached_comp.end();
+    Json_writer_array trace_attached_summary(writer,
+                                           "attached_conditions_summary");
+    for (tab= first_depth_first_tab(join); tab;
+          tab= next_depth_first_tab(join, tab))
+    {
+      if (!tab->table)
+       continue;
+      Item *const cond = tab->select_cond;
+      Json_writer_object trace_one_table(writer);
+      trace_one_table.add_member("table").add_table_name(tab->tab_list);
+      trace_one_table.add_member("attached").add_str(cond);
     }
   }
   DBUG_RETURN(0);

@@ -101,7 +101,39 @@ select * from v1	{
                 "cost": 2
               }
             }
-          ]
+          ],
+          {
+            "considered_execution_plans": [
+              {
+                "plan_prefix": [],
+                "table": "t1",
+                "best_access_path": {
+                  "considered_access_paths": [
+                    {
+                      "access_type": "scan",
+                      "resulting_rows": 2,
+                      "cost": 2.0044,
+                      "chosen": true
+                    }
+                  ]
+                },
+                "rows_for_plan": 2,
+                "cost_for_plan": 2.4044
+              }
+            ]
+          },
+          {
+            "attaching_conditions_to_tables": {
+              "original_condition": "t1.a = 1",
+              "attached_conditions_computation": [],
+              "attached_conditions_summary": [
+                {
+                  "table": "t1",
+                  "attached": "t1.a = 1"
+                }
+              ]
+            }
+          }
         ]
       }
     },
@@ -170,7 +202,39 @@ select * from (select * from t1)q	{
                 "cost": 2
               }
             }
-          ]
+          ],
+          {
+            "considered_execution_plans": [
+              {
+                "plan_prefix": [],
+                "table": "t1",
+                "best_access_path": {
+                  "considered_access_paths": [
+                    {
+                      "access_type": "scan",
+                      "resulting_rows": 2,
+                      "cost": 2.0044,
+                      "chosen": true
+                    }
+                  ]
+                },
+                "rows_for_plan": 2,
+                "cost_for_plan": 2.4044
+              }
+            ]
+          },
+          {
+            "attaching_conditions_to_tables": {
+              "original_condition": null,
+              "attached_conditions_computation": [],
+              "attached_conditions_summary": [
+                {
+                  "table": "t1",
+                  "attached": null
+                }
+              ]
+            }
+          }
         ]
       }
     },
@@ -266,7 +330,40 @@ select * from v2	{
                       "cost": 2
                     }
                   }
-                ]
+                ],
+                {
+                  "considered_execution_plans": [
+                    {
+                      "plan_prefix": [],
+                      "table": "t1",
+                      "best_access_path": {
+                        "considered_access_paths": [
+                          {
+                            "access_type": "scan",
+                            "resulting_rows": 2,
+                            "cost": 2.0044,
+                            "chosen": true,
+                            "use_tmp_table": true
+                          }
+                        ]
+                      },
+                      "rows_for_plan": 2,
+                      "cost_for_plan": 2.4044
+                    }
+                  ]
+                },
+                {
+                  "attaching_conditions_to_tables": {
+                    "original_condition": "t1.a = 1",
+                    "attached_conditions_computation": [],
+                    "attached_conditions_summary": [
+                      {
+                        "table": "t1",
+                        "attached": "t1.a = 1"
+                      }
+                    ]
+                  }
+                }
               ]
             }
           },
@@ -288,7 +385,39 @@ select * from v2	{
                 "cost": 2
               }
             }
-          ]
+          ],
+          {
+            "considered_execution_plans": [
+              {
+                "plan_prefix": [],
+                "table": "v2",
+                "best_access_path": {
+                  "considered_access_paths": [
+                    {
+                      "access_type": "scan",
+                      "resulting_rows": 2,
+                      "cost": 2,
+                      "chosen": true
+                    }
+                  ]
+                },
+                "rows_for_plan": 2,
+                "cost_for_plan": 2.4
+              }
+            ]
+          },
+          {
+            "attaching_conditions_to_tables": {
+              "original_condition": null,
+              "attached_conditions_computation": [],
+              "attached_conditions_summary": [
+                {
+                  "table": "v2",
+                  "attached": null
+                }
+              ]
+            }
+          }
         ]
       }
     },
@@ -408,7 +537,114 @@ explain select * from t1,t2 where t1.a=t2.b+2 and t2.a= t1.b	{
                 "cost": 2
               }
             }
-          ]
+          ],
+          {
+            "considered_execution_plans": [
+              {
+                "plan_prefix": [],
+                "table": "t1",
+                "best_access_path": {
+                  "considered_access_paths": [
+                    {
+                      "access_type": "scan",
+                      "resulting_rows": 100,
+                      "cost": 2.3174,
+                      "chosen": true
+                    }
+                  ]
+                },
+                "rows_for_plan": 100,
+                "cost_for_plan": 22.317,
+                "rest_of_plan": [
+                  {
+                    "plan_prefix": ["t1"],
+                    "table": "t2",
+                    "best_access_path": {
+                      "considered_access_paths": [
+                        {
+                          "access_type": "ref",
+                          "index": "a",
+                          "used_range_estimates": false,
+                          "cause": "not_available",
+                          "rows": 1,
+                          "cost": 200.2,
+                          "chosen": true
+                        },
+                        {
+                          "access_type": "scan",
+                          "resulting_rows": 75,
+                          "cost": 7.3174,
+                          "chosen": false
+                        }
+                      ]
+                    },
+                    "rows_for_plan": 100,
+                    "cost_for_plan": 242.32
+                  }
+                ]
+              },
+              {
+                "plan_prefix": [],
+                "table": "t2",
+                "best_access_path": {
+                  "considered_access_paths": [
+                    {
+                      "access_type": "scan",
+                      "resulting_rows": 100,
+                      "cost": 2.3174,
+                      "chosen": true
+                    }
+                  ]
+                },
+                "rows_for_plan": 100,
+                "cost_for_plan": 22.317,
+                "rest_of_plan": [
+                  {
+                    "plan_prefix": ["t2"],
+                    "table": "t1",
+                    "best_access_path": {
+                      "considered_access_paths": [
+                        {
+                          "access_type": "ref",
+                          "index": "a",
+                          "used_range_estimates": false,
+                          "cause": "not_available",
+                          "rows": 1,
+                          "cost": 200.2,
+                          "chosen": true
+                        },
+                        {
+                          "access_type": "scan",
+                          "resulting_rows": 75,
+                          "cost": 7.3174,
+                          "chosen": false
+                        }
+                      ]
+                    },
+                    "rows_for_plan": 100,
+                    "cost_for_plan": 242.32,
+                    "pruned_by_cost": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "attaching_conditions_to_tables": {
+              "original_condition": "t2.a = t1.b and t1.a = t2.b + 2",
+              "attached_conditions_computation": [],
+              "attached_conditions_summary": [
+                {
+                  "table": "t1",
+                  "attached": "t1.b is not null"
+                },
+                {
+                  "table": "t2",
+                  "attached": "t1.a = t2.b + 2"
+                }
+              ]
+            }
+          }
         ]
       }
     },
@@ -461,62 +697,106 @@ EXPLAIN SELECT DISTINCT a FROM t1	{
           },
           "rows_estimation": [
             {
-              "rows_estimation": [
+              "table": "t1",
+              "range_analysis": {
+                "table_scan": {
+                  "rows": 65536,
+                  "cost": 13255
+                },
+                "potential_range_indexes": [
+                  {
+                    "index": "PRIMARY",
+                    "usable": false,
+                    "cause": "not_applicable"
+                  },
+                  {
+                    "index": "a",
+                    "usable": true,
+                    "key_parts": ["a"]
+                  }
+                ],
+                "best_covering_index_scan": {
+                  "index": "a",
+                  "cost": 14627,
+                  "chosen": false,
+                  "cause": "cost"
+                },
+                "group_index_range": {
+                  "distinct_query": true,
+                  "potential_group_range_indexes": [
+                    {
+                      "index": "a",
+                      "covering": true,
+                      "rows": 5,
+                      "cost": 7.5
+                    }
+                  ]
+                },
+                "best_group_range_summary": {
+                  "type": "index_group",
+                  "index": "a",
+                  "group_attribute": null,
+                  "min_aggregate": false,
+                  "max_aggregate": false,
+                  "distinct_aggregate": false,
+                  "rows": 5,
+                  "cost": 7.5,
+                  "key_parts_used_for_access": ["a"],
+                  "ranges": [],
+                  "chosen": true
+                },
+                "chosen_range_access_summary": {
+                  "range_access_plan": {
+                    "type": "index_group",
+                    "index": "a",
+                    "group_attribute": null,
+                    "min_aggregate": false,
+                    "max_aggregate": false,
+                    "distinct_aggregate": false,
+                    "rows": 5,
+                    "cost": 7.5,
+                    "key_parts_used_for_access": ["a"],
+                    "ranges": []
+                  },
+                  "rows_for_plan": 5,
+                  "cost_for_plan": 7.5,
+                  "chosen": true
+                }
+              }
+            }
+          ],
+          {
+            "considered_execution_plans": [
+              {
+                "plan_prefix": [],
+                "table": "t1",
+                "best_access_path": {
+                  "considered_access_paths": [
+                    {
+                      "access_type": "range",
+                      "resulting_rows": 5,
+                      "cost": 7.5,
+                      "chosen": true
+                    }
+                  ]
+                },
+                "rows_for_plan": 5,
+                "cost_for_plan": 8.5
+              }
+            ]
+          },
+          {
+            "attaching_conditions_to_tables": {
+              "original_condition": null,
+              "attached_conditions_computation": [],
+              "attached_conditions_summary": [
                 {
                   "table": "t1",
-                  "range_analysis": {
-                    "table_scan": {
-                      "rows": 65536,
-                      "cost": 13255
-                    },
-                    "potential_range_indexes": [
-                      {
-                        "index": "PRIMARY",
-                        "usable": false,
-                        "cause": "not_applicable"
-                      },
-                      {
-                        "index": "a",
-                        "usable": true,
-                        "key_parts": ["a"]
-                      }
-                    ],
-                    "best_covering_index_scan": {
-                      "index": "a",
-                      "cost": 14627,
-                      "chosen": false,
-                      "cause": "cost"
-                    },
-                    "group_index_range": {
-                      "distinct_query": true,
-                      "potential_group_range_indexes": [
-                        {
-                          "index": "a",
-                          "covering": true,
-                          "rows": 5,
-                          "cost": 7.5
-                        }
-                      ]
-                    },
-                    "best_group_range_summary": {
-                      "type": "index_group",
-                      "index": "a",
-                      "group_attribute": null,
-                      "min_aggregate": false,
-                      "max_aggregate": false,
-                      "distinct_aggregate": false,
-                      "rows": 5,
-                      "cost": 7.5,
-                      "key_parts_used_for_access": ["a"],
-                      "ranges": [],
-                      "chosen": true
-                    },
-                    "chosen_range_access_summary": {}
-                  }
+                  "attached": null
                 }
               ]
             }
-          ]
+          }
         ]
       }
     },
@@ -593,59 +873,110 @@ EXPLAIN SELECT MIN(d) FROM t1 where b=2 and c=3  group by a	{
           },
           "rows_estimation": [
             {
-              "rows_estimation": [
+              "table": "t1",
+              "range_analysis": {
+                "table_scan": {
+                  "rows": 7,
+                  "cost": 5
+                },
+                "potential_range_indexes": [
+                  {
+                    "index": "a",
+                    "usable": true,
+                    "key_parts": ["a", "b", "c", "d"]
+                  }
+                ],
+                "best_covering_index_scan": {
+                  "index": "a",
+                  "cost": 2.7006,
+                  "chosen": true
+                },
+                "setup_range_conditions": [],
+                "group_index_range": {
+                  "potential_group_range_indexes": [
+                    {
+                      "index": "a",
+                      "covering": true,
+                      "index_dives_for_eq_ranges": true,
+                      "ranges": ["2 <= b <= 2 AND 3 <= c <= 3"],
+                      "rows": 4,
+                      "cost": 2.2
+                    }
+                  ]
+                },
+                "best_group_range_summary": {
+                  "type": "index_group",
+                  "index": "a",
+                  "group_attribute": "d",
+                  "min_aggregate": true,
+                  "max_aggregate": false,
+                  "distinct_aggregate": false,
+                  "rows": 4,
+                  "cost": 2.2,
+                  "key_parts_used_for_access": ["a", "b", "c"],
+                  "ranges": ["2 <= b <= 2 AND 3 <= c <= 3"],
+                  "chosen": true
+                },
+                "analyzing_range_alternatives": {
+                  "range_scan_alternatives": [],
+                  "analyzing_roworder_intersect": {
+                    "cause": "too_few_roworder_scans"
+                  },
+                  "analyzing_index_merge_union": []
+                },
+                "chosen_range_access_summary": {
+                  "range_access_plan": {
+                    "type": "index_group",
+                    "index": "a",
+                    "group_attribute": "d",
+                    "min_aggregate": true,
+                    "max_aggregate": false,
+                    "distinct_aggregate": false,
+                    "rows": 4,
+                    "cost": 2.2,
+                    "key_parts_used_for_access": ["a", "b", "c"],
+                    "ranges": ["2 <= b <= 2 AND 3 <= c <= 3"]
+                  },
+                  "rows_for_plan": 4,
+                  "cost_for_plan": 2.2,
+                  "chosen": true
+                }
+              }
+            }
+          ],
+          {
+            "considered_execution_plans": [
+              {
+                "plan_prefix": [],
+                "table": "t1",
+                "best_access_path": {
+                  "considered_access_paths": [
+                    {
+                      "access_type": "range",
+                      "resulting_rows": 4,
+                      "cost": 2.2,
+                      "chosen": true,
+                      "use_tmp_table": true
+                    }
+                  ]
+                },
+                "rows_for_plan": 4,
+                "cost_for_plan": 3
+              }
+            ]
+          },
+          {
+            "attaching_conditions_to_tables": {
+              "original_condition": "t1.b = 2 and t1.c = 3",
+              "attached_conditions_computation": [],
+              "attached_conditions_summary": [
                 {
                   "table": "t1",
-                  "range_analysis": {
-                    "table_scan": {
-                      "rows": 7,
-                      "cost": 5
-                    },
-                    "potential_range_indexes": [
-                      {
-                        "index": "a",
-                        "usable": true,
-                        "key_parts": ["a", "b", "c", "d"]
-                      }
-                    ],
-                    "best_covering_index_scan": {
-                      "index": "a",
-                      "cost": 2.7006,
-                      "chosen": true
-                    },
-                    "setup_range_conditions": [],
-                    "group_index_range": {
-                      "potential_group_range_indexes": [
-                        {
-                          "index": "a",
-                          "covering": true,
-                          "index_dives_for_eq_ranges": true,
-                          "ranges": ["2 <= b <= 2 AND 3 <= c <= 3"],
-                          "rows": 4,
-                          "cost": 2.2
-                        }
-                      ]
-                    },
-                    "best_group_range_summary": {
-                      "type": "index_group",
-                      "index": "a",
-                      "group_attribute": "d",
-                      "min_aggregate": true,
-                      "max_aggregate": false,
-                      "distinct_aggregate": false,
-                      "rows": 4,
-                      "cost": 2.2,
-                      "key_parts_used_for_access": ["a", "b", "c"],
-                      "ranges": ["2 <= b <= 2 AND 3 <= c <= 3"],
-                      "chosen": true
-                    },
-                    "analyzing_range_alternatives": {},
-                    "chosen_range_access_summary": {}
-                  }
+                  "attached": "t1.b = 2 and t1.c = 3"
                 }
               ]
             }
-          ]
+          }
         ]
       }
     },

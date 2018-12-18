@@ -351,6 +351,8 @@ void Json_writer::add_str(Item *item)
     thd->variables.option_bits= save_option_bits;
     add_str(str.c_ptr_safe());
   }
+  else
+    add_null();
 }
 
 void get_info(THD *thd, Opt_trace_info* info)

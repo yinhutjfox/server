@@ -57,6 +57,11 @@ bool empty()
   return traces && (static_cast<uint>(traces->elements()) != 0);
 }
 
+bool is_started()
+{
+  return current_trace;
+}
+
 static const char *flag_names[];
 enum
 {
