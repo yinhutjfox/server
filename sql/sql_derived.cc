@@ -200,25 +200,6 @@ mysql_handle_single_derived(LEX *lex, TABLE_LIST *derived, uint phases)
       break;
   }
 
-  /*
-    Add to optimizer trace whether a derived table/view 
-    is merged into the parent select or not.
-  */
-
-  if (phases == DT_MERGE)
-  {
-    Opt_trace_context *const trace = &thd->opt_trace;
-    Json_writer *writer= trace->get_current_json();
-    Json_writer_object trace_wrapper(writer);
-    Json_writer_object trace_derived(writer, derived->is_derived() ? 
-                                     "derived" : "view");
-    if (writer)
-    {
-      writer->add_member("table").add_str(derived->alias.str ? derived->alias.str : "<NULL>");
-      writer->add_member("select_id").add_ll(derived->get_unit()->first_select()->select_number);
-      writer->add_member("merged").add_bool(derived->is_merged_derived());
-    }
-  }
   lex->thd->derived_tables_processing= FALSE;
   DBUG_RETURN(res);
 }
@@ -385,10 +366,13 @@ bool mysql_derived_merge(THD *thd, LEX *lex, TABLE_LIST *derived)
   uint tablenr;
   SELECT_LEX *parent_lex= derived->select_lex;
   Query_arena *arena, backup;
+  Opt_trace_context *const trace = &thd->opt_trace;
+  Json_writer *writer= trace->get_current_json();
   DBUG_ENTER("mysql_derived_merge");
   DBUG_PRINT("enter", ("Alias: '%s'  Unit: %p",
                        (derived->alias.str ? derived->alias.str : "<NULL>"),
                        derived->get_unit()));
+  char *cause;
 
   if (derived->merged)
   {
@@ -400,6 +384,7 @@ bool mysql_derived_merge(THD *thd, LEX *lex, TABLE_LIST *derived)
   if (dt_select->uncacheable & UNCACHEABLE_RAND)
   {
     /* There is random function => fall back to materialization. */
+    cause= "Random function in the select";
     derived->change_refs_to_fields();
     derived->set_materialized_derived();
     DBUG_RETURN(FALSE);
@@ -422,15 +407,11 @@ bool mysql_derived_merge(THD *thd, LEX *lex, TABLE_LIST *derived)
       and small subqueries, and the bigger one can't be merged it wouldn't
       block the smaller one.
     */
-    if (parent_lex->get_free_table_map(&map, &tablenr))
+    if (parent_lex->get_free_table_map(&map, &tablenr) ||
+       dt_select->leaf_tables.elements + tablenr > MAX_TABLES)
     {
       /* There is no enough table bits, fall back to materialization. */
-      goto unconditional_materialization;
-    }
-
-    if (dt_select->leaf_tables.elements + tablenr > MAX_TABLES)
-    {
-      /* There is no enough table bits, fall back to materialization. */
+      cause= "Not enough table bits to merge subquery";
       goto unconditional_materialization;
     }
 
@@ -507,6 +488,25 @@ exit_merge:
   DBUG_RETURN(res);
 
 unconditional_materialization:
+
+  if (unlikely(trace->is_started()))
+  {
+    /*
+     Add to the optimizer trace the change in choice for merged
+     derived tables/views to materialised ones.
+    */
+    Json_writer_object trace_wrapper(writer);
+    Json_writer_object trace_derived(writer, derived->is_derived() ?
+                                       "derived" : "view");
+    trace_derived.add_member("table")
+                 .add_str(derived->alias.str ? derived->alias.str : "<NULL>");
+    trace_derived.add_member("select_id")
+                 .add_ll(derived->get_unit()->first_select()->select_number);
+    trace_derived.add_member("initial_choice").add_str("merged");
+    trace_derived.add_member("final_choice").add_str("materialized");
+    trace_derived.add_member("cause").add_str(cause);
+  }
+
   derived->change_refs_to_fields();
   derived->set_materialized_derived();
   if (!derived->table || !derived->table->is_created())
@@ -675,6 +675,8 @@ bool mysql_derived_prepare(THD *thd, LEX *lex, TABLE_LIST *derived)
   DBUG_ENTER("mysql_derived_prepare");
   DBUG_PRINT("enter", ("unit: %p  table_list: %p  alias: '%s'",
                        unit, derived, derived->alias.str));
+  Opt_trace_context *const trace = &thd->opt_trace;
+  Json_writer *writer= trace->get_current_json();
 
   if (!unit)
     DBUG_RETURN(FALSE);
@@ -768,6 +770,24 @@ bool mysql_derived_prepare(THD *thd, LEX *lex, TABLE_LIST *derived)
     }
   }
 
+  if (unlikely(trace->is_started()))
+  {
+    /*
+      Add to optimizer trace whether a derived table/view
+      is merged into the parent select or not.
+    */
+    Json_writer_object trace_wrapper(writer);
+    Json_writer_object trace_derived(writer, derived->is_derived() ?
+                                       "derived" : "view");
+    trace_derived.add_member("table")
+                 .add_str(derived->alias.str ? derived->alias.str : "<NULL>");
+    trace_derived.add_member("select_id")
+                 .add_ll(derived->get_unit()->first_select()->select_number);
+    if (derived->is_materialized_derived())
+      trace_derived.add_member("materialized").add_bool(true);
+    if (derived->is_merged_derived())
+      trace_derived.add_member("merged").add_bool(true);
+  }
   /*
     Above cascade call of prepare is important for PS protocol, but after it
     is called we can check if we really need prepare for this derived

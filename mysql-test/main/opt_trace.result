@@ -34,6 +34,13 @@ select * from v1	{
         "select_id": 1,
         "steps": [
           {
+            "view": {
+              "table": "v1",
+              "select_id": 2,
+              "merged": true
+            }
+          },
+          {
             "join_preparation": {
               "select_id": 2,
               "steps": [
@@ -53,13 +60,6 @@ select * from v1	{
       "join_optimization": {
         "select_id": 1,
         "steps": [
-          {
-            "view": {
-              "table": "v1",
-              "select_id": 2,
-              "merged": true
-            }
-          },
           {
             "condition_processing": {
               "condition": "WHERE",
@@ -158,6 +158,13 @@ select * from (select * from t1)q	{
         "select_id": 1,
         "steps": [
           {
+            "derived": {
+              "table": "q",
+              "select_id": 2,
+              "merged": true
+            }
+          },
+          {
             "join_preparation": {
               "select_id": 2,
               "steps": [
@@ -177,13 +184,6 @@ select * from (select * from t1)q	{
       "join_optimization": {
         "select_id": 1,
         "steps": [
-          {
-            "derived": {
-              "table": "q",
-              "select_id": 2,
-              "merged": true
-            }
-          },
           {
             "table_dependencies": [
               {
@@ -259,6 +259,13 @@ select * from v2	{
         "select_id": 1,
         "steps": [
           {
+            "view": {
+              "table": "v2",
+              "select_id": 2,
+              "materialized": true
+            }
+          },
+          {
             "join_preparation": {
               "select_id": 2,
               "steps": [
@@ -278,13 +285,6 @@ select * from v2	{
       "join_optimization": {
         "select_id": 1,
         "steps": [
-          {
-            "view": {
-              "table": "v2",
-              "select_id": 2,
-              "merged": false
-            }
-          },
           {
             "join_optimization": {
               "select_id": 2,
