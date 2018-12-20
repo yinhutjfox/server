@@ -177,9 +177,6 @@ connection con1;
 show status like 'Rpl_semi_sync_master_clients';
 Variable_name	Value
 Rpl_semi_sync_master_clients	1
-show status like 'Rpl_semi_sync_master_status';
-Variable_name	Value
-Rpl_semi_sync_master_status	ON
 connection slave;
 STOP SLAVE IO_THREAD;
 include/wait_for_slave_io_to_stop.inc
