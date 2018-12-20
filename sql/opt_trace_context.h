@@ -18,6 +18,7 @@ void start(THD *thd, TABLE_LIST *tbl,
            const CHARSET_INFO *query_charset);
 void end();
 void set_query(const char *query, size_t length, const CHARSET_INFO *charset);
+void flush_optimizer_trace();
 
 private:
 
@@ -61,6 +62,8 @@ bool is_started()
 {
   return current_trace;
 }
+
+void missing_privilege();
 
 static const char *flag_names[];
 enum

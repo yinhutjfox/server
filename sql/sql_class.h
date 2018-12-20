@@ -1336,6 +1336,14 @@ public:
   restore_security_context(THD *thd, Security_context *backup);
 #endif
   bool user_matches(Security_context *);
+  /**
+    Check global access
+    @param want_access The required privileges
+    @param match_any if the security context must match all or any of the req.
+   *                 privileges.
+    @return True if the security context fulfills the access requirements.
+  */
+  bool check_access(ulong want_access, bool match_any = false);
 };
 
 
@@ -2294,6 +2302,8 @@ public:
 
   Security_context main_security_ctx;
   Security_context *security_ctx;
+  Security_context *security_context() const { return security_ctx; }
+  void set_security_context(Security_context *sctx) { security_ctx = sctx; }
 
   /*
     Points to info-string that we show in SHOW PROCESSLIST

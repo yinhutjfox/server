@@ -105,6 +105,87 @@ void opt_trace_print_expanded_query(THD *thd, SELECT_LEX *select_lex,
                                     Json_writer_object *trace_object);
 
 void add_table_scan_values_to_trace(Opt_trace_context* trace, JOIN_TAB *tab);
+
+/*
+  Security related (need to add a proper comment here)
+*/
+
+/**
+   If the security context is not that of the connected user, inform the trace
+   system that a privilege is missing. With one exception: see below.
+
+   @param thd
+
+   This serves to eliminate the following issue.
+   Any information readable by a SELECT may theoretically end up in
+   the trace. And a SELECT may read information from other places than tables:
+   - from views (reading their bodies)
+   - from stored routines (reading their bodies)
+   - from files (reading their content), with LOAD_FILE()
+   - from the list of connections (reading their queries...), with
+   I_S.PROCESSLIST.
+   If the connected user has EXECUTE privilege on a routine which does a
+   security context change, the routine can retrieve information internally
+   (if allowed by the SUID context's privileges), and present only a portion
+   of it to the connected user. But with tracing on, all information is
+   possibly in the trace. So the connected user receives more information than
+   the routine's definer intended to provide.  Fixing this issue would require
+   adding, near many privilege checks in the server, a new
+   optimizer-trace-specific check done against the connected user's context,
+   to verify that the connected user has the right to see the retrieved
+   information.
+
+   Instead, our chosen simpler solution is that if we see a security context
+   change where SUID user is not the connected user, we disable tracing. With
+   only one safe exception: if the connected user has all global privileges
+   (because then she/he can find any information anyway). By "all global
+   privileges" we mean everything but WITH GRANT OPTION (that latter one isn't
+   related to information gathering).
+
+   Read access to I_S.OPTIMIZER_TRACE by another user than the connected user
+   is restricted: @see fill_optimizer_trace_info().
+*/
+void opt_trace_disable_if_no_security_context_access(THD *thd);
+
+void opt_trace_disable_if_no_tables_access(THD *thd, TABLE_LIST *tbl);
+
+/**
+   If tracing is on, checks additional privileges for a view, to make sure
+   that the user has the right to do SHOW CREATE VIEW. For that:
+   - this function checks SHOW VIEW
+   - SELECT is tested in opt_trace_disable_if_no_tables_access()
+   - SELECT + SHOW VIEW is sufficient for SHOW CREATE VIEW.
+   We also check underlying tables.
+   If a privilege is missing, notifies the trace system.
+   This function should be called when the view's underlying tables have not
+   yet been merged.
+
+   @param thd               THD context
+   @param view              view to check
+   @param underlying_tables underlying tables/views of 'view'
+ */
+
+void opt_trace_disable_if_no_view_access(THD *thd, TABLE_LIST *view,
+                                         TABLE_LIST *underlying_tables);
+
+/**
+  If tracing is on, checks additional privileges on a stored routine, to make
+  sure that the user has the right to do SHOW CREATE PROCEDURE/FUNCTION. For
+  that, we use the same checks as in those SHOW commands.
+  If a privilege is missing, notifies the trace system.
+
+  This function is not redundant with
+  opt_trace_disable_if_no_security_context_access().
+  Indeed, for a SQL SECURITY INVOKER routine, there is no context change, but
+  we must still verify that the invoker can do SHOW CREATE.
+
+  For triggers, see note in sp_head::execute_trigger().
+
+  @param thd
+  @param sp  routine to check
+ */
+void opt_trace_disable_if_no_stored_proc_func_access(THD *thd, sp_head *sp);
+
 /**
    Fills information_schema.OPTIMIZER_TRACE with rows (one per trace)
    @retval 0 ok

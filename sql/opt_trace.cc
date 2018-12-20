@@ -22,6 +22,7 @@
 #include "sql_parse.h"
 #include "set_var.h"
 #include "my_json_writer.h"
+#include "sp_head.h"
 
 const char I_S_table_name[] = "OPTIMIZER_TRACE";
 
@@ -96,7 +97,11 @@ const char *Opt_trace_context::flag_names[] = {"enabled", "one_line", "default",
 
 inline bool sql_command_can_be_traced(enum enum_sql_command sql_command)
 {
-  return (sql_command_flags[sql_command] & CF_OPTIMIZER_TRACE);
+  /*
+    For first iteration we are only allowing select queries.
+    TODO: change to allow other queries.
+  */
+  return (sql_command == SQLCOM_SELECT);
 }
 
 void opt_trace_print_expanded_query(THD *thd, SELECT_LEX *select_lex,
@@ -124,6 +129,208 @@ void opt_trace_print_expanded_query(THD *thd, SELECT_LEX *select_lex,
   writer->add_member("expanded_query").add_str(str);
 }
 
+void opt_trace_disable_if_no_security_context_access(THD *thd)
+{
+  if (likely(!(thd->variables.optimizer_trace &
+               Opt_trace_context::FLAG_ENABLED)) ||  // (1)
+      thd->system_thread)                            // (2)
+  {
+    /*
+      (1) We know that the routine's execution starts with "enabled=off".
+      If it stays so until the routine ends, we needn't do security checks on
+      the routine.
+      If it does not stay so, it means the definer sets it to "on" somewhere
+      in the routine's body. Then it is his conscious decision to generate
+      traces, thus it is still correct to skip the security check.
+
+      (2) Threads of the Events Scheduler have an unusual security context
+      (thd->m_main_security_ctx.priv_user==NULL, see comment in
+      Security_context::change_security_context()).
+    */
+    return;
+  }
+  Opt_trace_context *const trace = &thd->opt_trace;
+  if (!trace->is_started())
+  {
+    /*
+      @@optimizer_trace has "enabled=on" but trace is not started.
+      Either Opt_trace_start ctor was not called for our statement (3), or it
+      was called but at that time, the variable had "enabled=off" (4).
+
+      There are no known cases of (3).
+
+      (4) suggests that the user managed to change the variable during
+      execution of the statement, and this statement is using
+      view/routine (note that we have not been able to provoke this, maybe
+      this is impossible). If it happens it is suspicious.
+
+      We disable I_S output. And we cannot do otherwise: we have no place to
+      store a possible "missing privilege" information (no Opt_trace_stmt, as
+      is_started() is false), so cannot do security checks, so cannot safely
+      do tracing, so have to disable I_S output. And even then, we don't know
+      when to re-enable I_S output, as we have no place to store the
+      information "re-enable tracing at the end of this statement", and we
+      don't even have a notion of statement here (statements in the optimizer
+      trace world mean an Opt_trace_stmt object, and there is none here). So
+      we must disable for the session's life.
+
+      COM_FIELD_LIST opens views, thus used to be a case of (3). To avoid
+      disabling I_S output for the session's life when this command is issued
+      (like in: "SET OPTIMIZER_TRACE='ENABLED=ON';USE somedb;" in the 'mysql'
+      command-line client), we have decided to create a Opt_trace_start for
+      this command. The command itself is not traced though
+      (SQLCOM_SHOW_FIELDS does not have CF_OPTIMIZER_TRACE).
+    */
+    return;
+  }
+  /*
+    Note that thd->main_security_ctx.master_access is probably invariant
+    accross the life of THD: GRANT/REVOKE don't affect global privileges of an
+    existing connection, per the manual.
+  */
+  if (!(thd->main_security_ctx.check_access(GLOBAL_ACLS & ~GRANT_ACL)) &&
+      (0 != strcmp(thd->main_security_ctx.priv_user,
+                   thd->security_context()->priv_user) ||
+       0 != my_strcasecmp(system_charset_info,
+                          thd->main_security_ctx.priv_host,
+                          thd->security_context()->priv_host)))
+    trace->missing_privilege();
+  return;
+}
+
+void opt_trace_disable_if_no_stored_proc_func_access(THD *thd, sp_head *sp)
+{
+  if (likely(!(thd->variables.optimizer_trace &
+               Opt_trace_context::FLAG_ENABLED)) ||
+      thd->system_thread)
+    return;
+
+  Opt_trace_context *const trace = &thd->opt_trace;
+  if (!trace->is_started())
+    return;
+  Security_context *const backup_thd_sctx = thd->security_context();
+  thd->set_security_context(&thd->main_security_ctx);
+  const bool rc = sp->check_execute_access(thd);
+  thd->set_security_context(backup_thd_sctx);
+  if (rc) trace->missing_privilege();
+  return;
+}
+
+/**
+   If tracing is on, checks additional privileges on a list of tables/views,
+   to make sure that the user has the right to do SHOW CREATE TABLE/VIEW and
+   "SELECT *". For that:
+   - this functions checks table-level SELECT
+   - which is sufficient for SHOW CREATE TABLE and "SELECT *", if a base table
+   - if a view, if the view has not been identified as such then
+   opt_trace_disable_if_no_view_access() will be later called and check SHOW
+   VIEW; other we check SHOW VIEW here; SHOW VIEW + SELECT is sufficient for
+   SHOW CREATE VIEW.
+   If a privilege is missing, notifies the trace system.
+
+   @param thd
+   @param tbl list of tables to check
+*/
+
+void opt_trace_disable_if_no_tables_access(THD *thd, TABLE_LIST *tbl)
+{
+  if (likely(!(thd->variables.optimizer_trace &
+              Opt_trace_context::FLAG_ENABLED)) || thd->system_thread)
+    return;
+  Opt_trace_context *const trace = &thd->opt_trace;
+
+  if (!trace->is_started())
+    return;
+
+  Security_context *const backup_thd_sctx = thd->security_context();
+  thd->set_security_context(&thd->main_security_ctx);
+  const TABLE_LIST *const first_not_own_table = thd->lex->first_not_own_table();
+  for (TABLE_LIST *t = tbl; t != NULL && t != first_not_own_table;
+       t = t->next_global)
+  {
+    /*
+      Anonymous derived tables (as in
+      "SELECT ... FROM (SELECT ...)") don't have their grant.privilege set.
+    */
+    if (!t->is_derived())
+    {
+      const GRANT_INFO backup_grant_info = t->grant;
+      Security_context *const backup_table_sctx = t->security_ctx;
+      t->security_ctx = NULL;
+      /*
+        (1) check_table_access() fills t->grant.privilege.
+        (2) Because SELECT privileges can be column-based,
+        check_table_access() will return 'false' as long as there is SELECT
+        privilege on one column. But we want a table-level privilege.
+      */
+
+      bool rc =
+          check_table_access(thd, SELECT_ACL, t, false, 1, true) ||  // (1)
+          ((t->grant.privilege & SELECT_ACL) == 0);                  // (2)
+      if (t->is_view())
+      {
+        /*
+          It's a view which has already been opened: we are executing a
+          prepared statement. The view has been unfolded in the global list of
+          tables. So underlying tables will be automatically checked in the
+          present function, but we need an explicit check of SHOW VIEW:
+        */
+        rc |= check_table_access(thd, SHOW_VIEW_ACL, t, false, 1, true);
+      }
+      t->security_ctx = backup_table_sctx;
+      t->grant = backup_grant_info;
+      if (rc)
+      {
+        trace->missing_privilege();
+        break;
+      }
+    }
+  }
+  thd->set_security_context(backup_thd_sctx);
+  return;
+}
+
+void opt_trace_disable_if_no_view_access(THD *thd, TABLE_LIST *view,
+                                         TABLE_LIST *underlying_tables)
+{
+
+  if (likely(!(thd->variables.optimizer_trace &
+               Opt_trace_context::FLAG_ENABLED)) ||
+      thd->system_thread)
+    return;
+  Opt_trace_context *const trace = &thd->opt_trace;
+  if (!trace->is_started())
+    return;
+
+  Security_context *const backup_table_sctx = view->security_ctx;
+  Security_context *const backup_thd_sctx = thd->security_context();
+  const GRANT_INFO backup_grant_info = view->grant;
+
+  view->security_ctx = NULL;  // no SUID context for view
+  // no SUID context for THD
+  thd->set_security_context(&thd->main_security_ctx);
+  const int rc = check_table_access(thd, SHOW_VIEW_ACL, view, false, 1, true);
+
+  view->security_ctx = backup_table_sctx;
+  thd->set_security_context(backup_thd_sctx);
+  view->grant = backup_grant_info;
+
+  if (rc)
+  {
+    trace->missing_privilege();
+    return;
+  }
+  /*
+    We needn't check SELECT privilege on this view. Some
+    opt_trace_disable_if_no_tables_access() call has or will check it.
+
+    Now we check underlying tables/views of our view:
+  */
+  opt_trace_disable_if_no_tables_access(thd, underlying_tables);
+  return;
+}
+
+
 /**
   @class Opt_trace_stmt
 
@@ -140,10 +347,12 @@ class Opt_trace_stmt {
   {
     ctx= ctx_arg;
     current_json= new Json_writer();
+    missing_priv= false;
   }
   ~Opt_trace_stmt()
   {
     delete current_json;
+    missing_priv= false;
   }
   void set_query(const char *query_ptr, size_t length, const CHARSET_INFO *charset);
   void open_struct(const char *key, char opening_bracket);
@@ -151,10 +360,12 @@ class Opt_trace_stmt {
   void fill_info(Opt_trace_info* info);
   void add(const char *key, char *opening_bracket, size_t val_length);
   Json_writer* get_current_json(){return current_json;}
+  void missing_privilege();
 private:
   Opt_trace_context *ctx;
   String query;  // store the query sent by the user
   Json_writer *current_json; // stores the trace
+  bool missing_priv;  ///< whether user lacks privilege to see this trace
 };
 
 void Opt_trace_stmt::set_query(const char *query_ptr, size_t length, const CHARSET_INFO *charset)
@@ -167,6 +378,12 @@ Json_writer* Opt_trace_context::get_current_json()
   if (!current_trace)
     return NULL;
   return current_trace->get_current_json();
+}
+
+void Opt_trace_context::missing_privilege()
+{
+  if (current_trace)
+    current_trace->missing_privilege();
 }
 
 Opt_trace_context::Opt_trace_context()
@@ -245,12 +462,14 @@ Opt_trace_start::Opt_trace_start(THD *thd, TABLE_LIST *tbl,
   if (unlikely(var & Opt_trace_context::FLAG_ENABLED) && 
       sql_command_can_be_traced(sql_command) && 
       !list_has_optimizer_trace_table(tbl) &&
-      !sets_var_optimizer_trace(sql_command, set_vars))
+      !sets_var_optimizer_trace(sql_command, set_vars) &&
+      !thd->system_thread)
   {
     ctx->start(thd, tbl, sql_command, query, query_length, query_charset);
     ctx->set_query(query, query_length, query_charset);
     traceable= TRUE;
   }
+  opt_trace_disable_if_no_tables_access(thd, tbl);
 }
 
 Opt_trace_start::~Opt_trace_start()
@@ -262,13 +481,28 @@ Opt_trace_start::~Opt_trace_start()
 
 void Opt_trace_stmt::fill_info(Opt_trace_info* info)
 {
-  info->trace_ptr = current_json->output.ptr();
-  info->trace_length = current_json->output.length();
-  info->query_ptr = query.ptr();
-  info->query_length = query.length();
-  info->query_charset = query.charset();
-  info->missing_bytes = 0;
-  info->missing_priv= 0;
+  if (unlikely(info->missing_priv = missing_priv))
+  {
+    info->trace_ptr = info->query_ptr = "";
+    info->trace_length = info->query_length = 0;
+    info->query_charset = &my_charset_bin;
+    info->missing_bytes = 0;
+  }
+  else
+  {
+    info->trace_ptr = current_json->output.ptr();
+    info->trace_length = current_json->output.length();
+    info->query_ptr = query.ptr();
+    info->query_length = query.length();
+    info->query_charset = query.charset();
+    info->missing_bytes = 0;
+    info->missing_priv= FALSE;
+  }
+}
+
+void Opt_trace_stmt::missing_privilege()
+{
+  missing_priv= true;
 }
 
 /*void Opt_trace_stmt::add(const char *key, char *val, size_t val_length)
@@ -353,6 +587,22 @@ void Json_writer::add_str(Item *item)
   }
   else
     add_null();
+}
+
+void Opt_trace_context::flush_optimizer_trace()
+{
+  inited= false;
+  if (traces)
+  {
+    while (traces->elements())
+    {
+      Opt_trace_stmt *prev= traces->at(0);
+      delete prev;
+      traces->del(0);
+    }
+    delete traces;
+    traces= NULL;
+  }
 }
 
 void get_info(THD *thd, Opt_trace_info* info)
