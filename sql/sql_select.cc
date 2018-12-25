@@ -7524,7 +7524,7 @@ best_access_path(JOIN      *join,
   else
   {
     trace_access_scan.add_member("type").add_str("scan");
-    trace_access_scan.add_member("chosen").add_bool("false");
+    trace_access_scan.add_member("chosen").add_bool(false);
     trace_access_scan.add_member("cause").add_str("cost");
   }
 
@@ -27037,6 +27037,14 @@ test_if_cheaper_ordering(const JOIN_TAB *tab, ORDER *order, TABLE *table,
   ha_rows refkey_rows_estimate= table->quick_condition_rows;
   const bool has_limit= (select_limit_arg != HA_POS_ERROR);
 
+  Opt_trace_context *const trace = &join->thd->opt_trace;
+  Json_writer *writer= trace->get_current_json();
+  Json_writer_object trace_wrapper(writer);
+  Json_writer_object trace_cheaper_ordering(
+      writer, "reconsidering_access_paths_for_index_ordering");
+  trace_cheaper_ordering.add_member("clause")
+                        .add_str(group ? "GROUP BY" : "ORDER BY");
+
   /*
     If not used with LIMIT, only use keys if the whole query can be
     resolved with a key;  This is because filesort() is usually faster than
@@ -27070,11 +27078,12 @@ test_if_cheaper_ordering(const JOIN_TAB *tab, ORDER *order, TABLE *table,
   else
     read_time= table->file->scan_time();
   
+  trace_cheaper_ordering.add_member("fanout").add_double(fanout);
   /*
     TODO: add cost of sorting here.
   */
   read_time += COST_EPS;
-
+  trace_cheaper_ordering.add_member("read_time").add_double(read_time);
   /*
     Calculate the selectivity of the ref_key for REF_ACCESS. For
     RANGE_ACCESS we use table->quick_condition_rows.
@@ -27091,11 +27100,18 @@ test_if_cheaper_ordering(const JOIN_TAB *tab, ORDER *order, TABLE *table,
     set_if_bigger(refkey_rows_estimate, 1);
   }
 
+  trace_cheaper_ordering.add_member("table_name").add_str(table->alias);
+  trace_cheaper_ordering.add_member("rows_estimation")
+                        .add_ll(refkey_rows_estimate);
+
+  Json_writer_array possible_keys(writer,"possible_keys");
   for (nr=0; nr < table->s->keys ; nr++)
   {
     int direction;
     ha_rows select_limit= select_limit_arg;
     uint used_key_parts= 0;
+    Json_writer_object possible_key(writer);
+    possible_key.add_member("index").add_str(table->key_info[nr].name);
 
     if (keys.is_set(nr) &&
         (direction= test_if_order_by_key(join, order, table, nr,
@@ -27108,6 +27124,7 @@ test_if_cheaper_ordering(const JOIN_TAB *tab, ORDER *order, TABLE *table,
       */
       DBUG_ASSERT (ref_key != (int) nr);
 
+      possible_key.add_member("can_resolve_order").add_bool(true);
       bool is_covering= (table->covering_keys.is_set(nr) ||
                          (table->file->index_flags(nr, 0, 1) &
                           HA_CLUSTERED_INDEX));
@@ -27219,6 +27236,7 @@ test_if_cheaper_ordering(const JOIN_TAB *tab, ORDER *order, TABLE *table,
           select_limit= (ha_rows) (select_limit *
                                    (double) table_records /
                                     refkey_rows_estimate);
+        possible_key.add_member("updated_limit").add_ll(select_limit);
         rec_per_key= keyinfo->actual_rec_per_key(keyinfo->user_defined_key_parts-1);
         set_if_bigger(rec_per_key, 1);
         /*
@@ -27238,9 +27256,13 @@ test_if_cheaper_ordering(const JOIN_TAB *tab, ORDER *order, TABLE *table,
         if (get_range_limit_read_cost(tab, table, nr, select_limit, 
                                        &range_scan_time))
         {
+          possible_key.add_member("range_scan_time")
+                      .add_double(range_scan_time);
           if (range_scan_time < index_scan_time)
             index_scan_time= range_scan_time;
         }
+        possible_key.add_member("index_scan_time")
+                    .add_double(index_scan_time);
 
         if ((ref_key < 0 && (group || table->force_index || is_covering)) ||
             index_scan_time < read_time)
@@ -27251,17 +27273,29 @@ test_if_cheaper_ordering(const JOIN_TAB *tab, ORDER *order, TABLE *table,
                                         table->covering_keys.is_set(ref_key)) ?
                                         refkey_rows_estimate :
                                         HA_POS_ERROR;
-          if ((is_best_covering && !is_covering) ||
-              (is_covering && refkey_select_limit < select_limit))
+          if (is_best_covering && !is_covering)
+          {
+            possible_key.add_member("chosen").add_bool(false);
+            possible_key.add_member("cause").add_str("covering_index_already_found");
             continue;
+          }
+
+          if (is_covering && refkey_select_limit < select_limit)
+          {
+            possible_key.add_member("chosen").add_bool(false);
+            possible_key.add_member("cause").add_str("ref_estimates_better");
+            continue;
+          }
           if (table->quick_keys.is_set(nr))
             quick_records= table->quick_rows[nr];
+          possible_key.add_member("records").add_ll(quick_records);
           if (best_key < 0 ||
               (select_limit <= MY_MIN(quick_records,best_records) ?
                keyinfo->user_defined_key_parts < best_key_parts :
                quick_records < best_records) ||
               (!is_best_covering && is_covering))
           {
+            possible_key.add_member("chosen").add_bool(true);
             best_key= nr;
             best_key_parts= keyinfo->user_defined_key_parts;
             if (saved_best_key_parts)
@@ -27271,8 +27305,49 @@ test_if_cheaper_ordering(const JOIN_TAB *tab, ORDER *order, TABLE *table,
             best_key_direction= direction; 
             best_select_limit= select_limit;
           }
+          else
+          {
+            char const *cause;
+            possible_key.add_member("chosen").add_bool(false);
+            if (is_covering)
+              cause= "covering_index_already_found";
+            else
+            {
+              if (select_limit <= MY_MIN(quick_records,best_records))
+                cause= "keyparts_greater_than_the_current_best_keyparts";
+              else
+                cause= "rows_estimation_greater";
+            }
+            possible_key.add_member("cause").add_str(cause);
+          }
+        }
+        else
+        {
+          possible_key.add_member("usable").add_bool(false);
+          possible_key.add_member("cause").add_str("cost");
         }   
-      }      
+      }
+      else
+      {
+        possible_key.add_member("usable").add_bool(false);
+        if (!group && select_limit == HA_POS_ERROR)
+          possible_key.add_member("cause").add_str("order_by_without_limit");
+      }
+    }
+    else
+    {
+      if (keys.is_set(nr))
+      {
+        possible_key.add_member("can_resolve_order").add_bool(false);
+        possible_key.add_member("cause").
+                     add_str("order_can_not_be_resolved_by_key");
+      }
+      else
+      {
+        possible_key.add_member("can_resolve_order").add_bool(false);
+        possible_key.add_member("cause")
+                    .add_str("not_usable_index_for_the query");
+      }
     }
   }
 

@@ -989,3 +989,265 @@ EXPLAIN SELECT MIN(d) FROM t1 where b=2 and c=3  group by a	{
   ]
 }	0	0
 DROP TABLE t1;
+#
+# Late ORDER BY optimization
+#
+create table ten(a int);
+insert into ten values (0),(1),(2),(3),(4),(5),(6),(7),(8),(9);
+create table one_k(a int primary key);
+insert into one_k select A.a + B.a* 10 + C.a * 100 from ten A, ten B, ten C;
+create table t1  (
+pk int not null,
+a int,
+b int,
+c int,
+filler char(100),
+KEY a_a(c),
+KEY a_c(a,c),
+KEY a_b(a,b)
+);
+insert into t1
+select a, a,a,a, 'filler-dataaa' from test.one_k;
+update t1 set a=1 where pk between 0 and 180;
+update t1 set b=2 where pk between 0 and 20;
+select count(*) from t1 where a=1 and b=2;
+count(*)
+21
+set optimizer_trace='enabled=on';
+explain  select * from t1 where a=1 and b=2 order by c limit 1;
+id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
+1	SIMPLE	t1	ref	a_c,a_b	a_b	10	const,const	21	Using where; Using filesort
+select * from INFORMATION_SCHEMA.OPTIMIZER_TRACE;
+QUERY	TRACE	MISSING_BYTES_BEYOND_MAX_MEM_SIZE	INSUFFICIENT_PRIVILEGES
+explain  select * from t1 where a=1 and b=2 order by c limit 1	{
+  "steps": [
+    {
+      "join_preparation": {
+        "select_id": 1,
+        "steps": [
+          {
+            "expanded_query": "select `t1`.`pk` AS `pk`,`t1`.`a` AS `a`,`t1`.`b` AS `b`,`t1`.`c` AS `c`,`t1`.`filler` AS `filler` from `t1` where `t1`.`a` = 1 and `t1`.`b` = 2 order by `t1`.`c` limit 1"
+          }
+        ]
+      }
+    },
+    {
+      "join_optimization": {
+        "select_id": 1,
+        "steps": [
+          {
+            "condition_processing": {
+              "condition": "WHERE",
+              "original_condition": "t1.a = 1 and t1.b = 2",
+              "steps": [
+                {
+                  "transformation": "equality_propagation",
+                  "resulting_condition": "multiple equal(1, t1.a) and multiple equal(2, t1.b)"
+                },
+                {
+                  "transformation": "constant_propagation",
+                  "resulting_condition": "multiple equal(1, t1.a) and multiple equal(2, t1.b)"
+                },
+                {
+                  "transformation": "trivial_condition_removal",
+                  "resulting_condition": "multiple equal(1, t1.a) and multiple equal(2, t1.b)"
+                }
+              ]
+            }
+          },
+          {
+            "table_dependencies": [
+              {
+                "table": "t1",
+                "row_may_be_null": false,
+                "map_bit": 0,
+                "depends_on_map_bits": []
+              }
+            ]
+          },
+          {
+            "ref_optimizer_key_uses": [
+              {
+                "table": "t1",
+                "field": "a",
+                "equals": "1",
+                "null_rejecting": false
+              },
+              {
+                "table": "t1",
+                "field": "a",
+                "equals": "1",
+                "null_rejecting": false
+              },
+              {
+                "table": "t1",
+                "field": "b",
+                "equals": "2",
+                "null_rejecting": false
+              }
+            ]
+          },
+          "rows_estimation": [
+            {
+              "table": "t1",
+              "range_analysis": {
+                "table_scan": {
+                  "rows": 1000,
+                  "cost": 232
+                },
+                "potential_range_indexes": [
+                  {
+                    "index": "a_a",
+                    "usable": false,
+                    "cause": "not_applicable"
+                  },
+                  {
+                    "index": "a_c",
+                    "usable": true,
+                    "key_parts": ["a", "c"]
+                  },
+                  {
+                    "index": "a_b",
+                    "usable": true,
+                    "key_parts": ["a", "b"]
+                  }
+                ],
+                "setup_range_conditions": [],
+                "group_index_range": {
+                  "chosen": false,
+                  "cause": "no_group_by_or_distinct"
+                },
+                "analyzing_range_alternatives": {
+                  "range_scan_alternatives": [
+                    {
+                      "index": "a_c",
+                      "ranges": ["1 <= a <= 1"],
+                      "rowid_ordered": false,
+                      "using_mrr": false,
+                      "index_only": false,
+                      "rows": 180,
+                      "cost": 217.01,
+                      "chosen": true
+                    },
+                    {
+                      "index": "a_b",
+                      "ranges": ["1 <= a <= 1 AND 2 <= b <= 2"],
+                      "rowid_ordered": true,
+                      "using_mrr": false,
+                      "index_only": false,
+                      "rows": 21,
+                      "cost": 26.21,
+                      "chosen": true
+                    }
+                  ],
+                  "analyzing_roworder_intersect": {
+                    "cause": "too_few_roworder_scans"
+                  },
+                  "analyzing_index_merge_union": []
+                },
+                "chosen_range_access_summary": {
+                  "range_access_plan": {
+                    "type": "range_scan",
+                    "index": "a_b",
+                    "rows": 21,
+                    "ranges": ["1 <= a <= 1 AND 2 <= b <= 2"]
+                  },
+                  "rows_for_plan": 21,
+                  "cost_for_plan": 26.21,
+                  "chosen": true
+                }
+              }
+            }
+          ],
+          {
+            "considered_execution_plans": [
+              {
+                "plan_prefix": [],
+                "table": "t1",
+                "best_access_path": {
+                  "considered_access_paths": [
+                    {
+                      "access_type": "ref",
+                      "index": "a_c",
+                      "used_range_estimates": true,
+                      "rows": 180,
+                      "cost": 128,
+                      "chosen": true
+                    },
+                    {
+                      "access_type": "ref",
+                      "index": "a_b",
+                      "used_range_estimates": true,
+                      "rows": 21,
+                      "cost": 26.2,
+                      "chosen": true
+                    },
+                    {
+                      "type": "scan",
+                      "chosen": false,
+                      "cause": "cost"
+                    }
+                  ]
+                },
+                "rows_for_plan": 21,
+                "cost_for_plan": 26.2
+              }
+            ]
+          },
+          {
+            "attaching_conditions_to_tables": {
+              "original_condition": "t1.a = 1 and t1.b = 2",
+              "attached_conditions_computation": [],
+              "attached_conditions_summary": [
+                {
+                  "table": "t1",
+                  "attached": null
+                }
+              ]
+            }
+          },
+          {
+            "reconsidering_access_paths_for_index_ordering": {
+              "clause": "ORDER BY",
+              "fanout": 1,
+              "read_time": 22.001,
+              "table_name": "t1",
+              "rows_estimation": 21,
+              "possible_keys": [
+                {
+                  "index": "a_a",
+                  "can_resolve_order": true,
+                  "updated_limit": 47,
+                  "index_scan_time": 47,
+                  "usable": false,
+                  "cause": "cost"
+                },
+                {
+                  "index": "a_c",
+                  "can_resolve_order": true,
+                  "updated_limit": 47,
+                  "range_scan_time": 24.022,
+                  "index_scan_time": 24.022,
+                  "usable": false,
+                  "cause": "cost"
+                },
+                {
+                  "index": "a_b",
+                  "can_resolve_order": false,
+                  "cause": "not_usable_index_for_the query"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "join_execution": {
+        "select_id": 1,
+        "steps": []
+      }
+    }
+  ]
+}	0	0
+drop table t1,ten,one_k;

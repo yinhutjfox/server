@@ -252,7 +252,7 @@ void opt_trace_disable_if_no_tables_access(THD *thd, TABLE_LIST *tbl)
       Anonymous derived tables (as in
       "SELECT ... FROM (SELECT ...)") don't have their grant.privilege set.
     */
-    if (!t->is_derived())
+    if (!t->is_anonymous_derived_table())
     {
       const GRANT_INFO backup_grant_info = t->grant;
       Security_context *const backup_table_sctx = t->security_ctx;

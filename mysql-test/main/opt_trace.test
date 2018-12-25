@@ -83,3 +83,32 @@ ANALYZE TABLE t1;
 EXPLAIN SELECT MIN(d) FROM t1 where b=2 and c=3  group by a;
 select * from information_schema.OPTIMIZER_TRACE;
 DROP TABLE t1;
+
+--echo #
+--echo # Late ORDER BY optimization
+--echo #
+
+create table ten(a int);
+insert into ten values (0),(1),(2),(3),(4),(5),(6),(7),(8),(9);
+create table one_k(a int primary key);
+insert into one_k select A.a + B.a* 10 + C.a * 100 from ten A, ten B, ten C;
+create table t1  (
+  pk int not null,
+  a int,
+  b int,
+  c int,
+  filler char(100),
+  KEY a_a(c),
+  KEY a_c(a,c),
+  KEY a_b(a,b)
+);
+ 
+insert into t1
+select a, a,a,a, 'filler-dataaa' from test.one_k;
+update t1 set a=1 where pk between 0 and 180;
+update t1 set b=2 where pk between 0 and 20;
+select count(*) from t1 where a=1 and b=2;
+set optimizer_trace='enabled=on';
+explain  select * from t1 where a=1 and b=2 order by c limit 1;
+select * from INFORMATION_SCHEMA.OPTIMIZER_TRACE;
+drop table t1,ten,one_k;
