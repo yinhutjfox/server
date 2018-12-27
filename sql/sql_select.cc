@@ -7310,14 +7310,13 @@ best_access_path(JOIN      *join,
         loose_scan_opt.check_ref_access_part2(key, start_key, records, tmp);
       } /* not ft_key */
 
-      double cur_ref_cost= tmp + records/(double) TIME_FOR_COMPARE;
       trace_access_idx.add_member("rows").add_double(records);
-      trace_access_idx.add_member("cost").add_double(cur_ref_cost);
+      trace_access_idx.add_member("cost").add_double(tmp);
 
       if (tmp + 0.0001 < best_time - records/(double) TIME_FOR_COMPARE)
       {
         trace_access_idx.add_member("chosen").add_bool(true);
-        best_time= cur_ref_cost;
+        best_time= tmp + records/(double) TIME_FOR_COMPARE;
         best= tmp;
         best_records= records;
         best_key= start_key;
@@ -7374,7 +7373,7 @@ best_access_path(JOIN      *join,
     trace_access_hash.add_member("type").add_str("hash");
     trace_access_hash.add_member("index").add_str("hj-key");
     trace_access_hash.add_member("cost").add_double(rnd_records);
-    trace_access_hash.add_member("cost").add_double(best_time);
+    trace_access_hash.add_member("cost").add_double(best);
     trace_access_hash.add_member("chosen").add_bool(true);
   }
 
@@ -7524,6 +7523,7 @@ best_access_path(JOIN      *join,
   else
   {
     trace_access_scan.add_member("type").add_str("scan");
+    trace_access_scan.add_member("cost").add_double(s->read_time);
     trace_access_scan.add_member("chosen").add_bool(false);
     trace_access_scan.add_member("cause").add_str("cost");
   }
@@ -8981,12 +8981,12 @@ best_extension_by_limited_search(JOIN      *join,
 
       /*
         TODO add filtering estimates here
-      */
+
       trace_one_table.add_member("rows_for_plan")
                      .add_double(current_record_count);
       trace_one_table.add_member("cost_for_plan")
                      .add_double(current_read_time);
-
+      */
       advance_sj_state(join, remaining_tables, idx, &current_record_count,
                        &current_read_time, &loose_scan_pos);
 
