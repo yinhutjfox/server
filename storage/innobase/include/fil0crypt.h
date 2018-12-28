@@ -350,6 +350,8 @@ Decrypt a page.
 @param[in]	page_size		Page size
 @param[in,out]	src_frame		Page to decrypt
 @param[out]	err			DB_SUCCESS or error
+@param[out]	ssn_id			split sequence number for spatial
+					index pages.
 @return true if page decrypted, false if not.*/
 UNIV_INTERN
 bool
@@ -358,7 +360,8 @@ fil_space_decrypt(
 	byte*			tmp_frame,
 	const page_size_t&	page_size,
 	byte*			src_frame,
-	dberr_t*		err);
+	dberr_t*		err,
+	ib_uint32_t*		ssn_id = NULL);
 
 /******************************************************************
 Decrypt a page

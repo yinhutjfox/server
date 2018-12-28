@@ -564,6 +564,8 @@ fil_encrypt_buf(
 	ulint orig_page_type = mach_read_from_2(src_frame+FIL_PAGE_TYPE);
 	ibool page_compressed = (orig_page_type == FIL_PAGE_PAGE_COMPRESSED_ENCRYPTED);
 	uint header_len = FIL_PAGE_DATA;
+	bool rtree_page = (orig_page_type == FIL_PAGE_RTREE);
+	node_seq_t ssn_id;
 
 	if (page_compressed) {
 		header_len += (FIL_PAGE_COMPRESSED_SIZE + FIL_PAGE_COMPRESSION_METHOD_SIZE);
@@ -571,6 +573,12 @@ fil_encrypt_buf(
 
 	/* FIL page header is not encrypted */
 	memcpy(dst_frame, src_frame, header_len);
+
+	if (orig_page_type == FIL_PAGE_RTREE) {
+		ssn_id = static_cast<node_seq_t>(
+			mach_read_from_8(src_frame + FIL_RTREE_SPLIT_SEQ_NUM));
+		mach_write_to_2(dst_frame + FIL_PAGE_TYPE, FIL_PAGE_ENCRYPTED_RTREE);
+	}
 
 	/* Store key version */
 	mach_write_to_4(dst_frame + FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION, key_version);
@@ -586,11 +594,50 @@ fil_encrypt_buf(
 		srclen = mach_read_from_2(src_frame + FIL_PAGE_DATA);
 	}
 
-	int rc = encryption_scheme_encrypt(src, srclen, dst, &dstlen,
-					   crypt_data, key_version,
-					   (uint32)space, (uint32)offset, lsn);
-	ut_a(rc == MY_AES_OK);
-	ut_a(dstlen == srclen);
+	if (rtree_page) {
+		ulint	orig_src_len = srclen;
+		byte	ssn_char[4];
+
+		srclen = PAGE_BTR_SEG_TOP;
+		int rc = encryption_scheme_encrypt(src, srclen, dst, &dstlen,
+						   crypt_data, key_version,
+						   (uint32) space, (uint32) offset,
+						   lsn);
+		ut_a(rc == MY_AES_OK);
+		ut_a(dstlen == srclen);
+
+		/** Write the ssn number to PAGE_BTR_SEG_TOP location for
+		encrypted page. */
+		dst += srclen;
+
+		mach_write_to_4(ssn_char, ssn_id);
+
+		rc = encryption_scheme_encrypt((unsigned char*) ssn_char, 4, dst,
+					       &dstlen, crypt_data, key_version,
+					       (uint32) space, (uint32) offset,
+					       lsn);
+		ut_a(rc == MY_AES_OK);
+		ut_a(dstlen == 4);
+
+		/** Encrypt the remaining page from PAGE_BTR_SEG_TOP. */
+		src += srclen + 4;
+		dst += 4;
+		srclen = orig_src_len - (srclen + 4);
+
+		rc = encryption_scheme_encrypt(src, srclen, dst, &dstlen,
+					       crypt_data, key_version,
+					       (uint32) space, (uint32) offset,
+					       lsn);
+		ut_a(rc == MY_AES_OK);
+		ut_a(dstlen == srclen);
+	} else {
+		int rc = encryption_scheme_encrypt(
+				src, srclen, dst, &dstlen,
+				crypt_data, key_version,
+				(uint32)space, (uint32)offset, lsn);
+		ut_a(rc == MY_AES_OK);
+		ut_a(dstlen == srclen);
+	}
 
 	/* For compressed tables we do not store the FIL header because
 	the whole page is not stored to the disk. In compressed tables only
@@ -643,7 +690,6 @@ fil_space_encrypt(
 	switch (mach_read_from_2(src_frame+FIL_PAGE_TYPE)) {
 	case FIL_PAGE_TYPE_FSP_HDR:
 	case FIL_PAGE_TYPE_XDES:
-	case FIL_PAGE_RTREE:
 		/* File space header, extent descriptor or spatial index
 		are not encrypted. */
 		return src_frame;
@@ -667,6 +713,9 @@ fil_space_encrypt(
 		bool page_compressed_encrypted = (mach_read_from_2(tmp+FIL_PAGE_TYPE) == FIL_PAGE_PAGE_COMPRESSED_ENCRYPTED);
 		byte uncomp_mem[UNIV_PAGE_SIZE_MAX];
 		byte tmp_mem[UNIV_PAGE_SIZE_MAX];
+		bool rtree_encrypted = (mach_read_from_2(tmp + FIL_PAGE_TYPE)
+					== FIL_PAGE_ENCRYPTED_RTREE);
+		node_seq_t ssn_value = 0;
 
 		if (page_compressed_encrypted) {
 			memcpy(uncomp_mem, src, srv_page_size);
@@ -680,7 +729,8 @@ fil_space_encrypt(
 
 		ut_ad(!buf_page_is_corrupted(true, src, page_size, space));
 		ut_ad(fil_space_decrypt(crypt_data, tmp_mem, page_size, tmp,
-					&err));
+					&err, rtree_encrypted ? &ssn_value : NULL));
+
 		ut_ad(err == DB_SUCCESS);
 
 		/* Need to decompress the page if it was also compressed */
@@ -691,8 +741,14 @@ fil_space_encrypt(
 			ut_ad(unzipped2);
 		}
 
-		memcpy(tmp_mem + FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION,
-		       src + FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION, 8);
+		if (rtree_encrypted) {
+			mach_write_to_4(tmp_mem + FIL_RTREE_SPLIT_SEQ_NUM, 0);
+			mach_write_to_4(tmp_mem + FIL_RTREE_SPLIT_SEQ_NUM + 4,
+					ssn_value);
+		} else {
+			memcpy(tmp_mem + FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION,
+			       src + FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION, 8);
+		}
 		ut_ad(!memcmp(src, tmp_mem, page_size.physical()));
 	}
 #endif /* UNIV_DEBUG */
@@ -706,6 +762,8 @@ fil_space_encrypt(
 @param[in]	page_size		Page size
 @param[in,out]	src_frame		Page to decrypt
 @param[out]	err			DB_SUCCESS or DB_DECRYPTION_FAILED
+@param[out]	ssn_id			split sequence number for spatial index
+					or NULL for other indexes
 @return true if page decrypted, false if not.*/
 UNIV_INTERN
 bool
@@ -714,7 +772,8 @@ fil_space_decrypt(
 	byte*			tmp_frame,
 	const page_size_t&	page_size,
 	byte*			src_frame,
-	dberr_t*		err)
+	dberr_t*		err,
+	ib_uint32_t*		ssn_id)
 {
 	ulint page_type = mach_read_from_2(src_frame+FIL_PAGE_TYPE);
 	uint key_version = mach_read_from_4(src_frame + FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION);
@@ -752,22 +811,69 @@ fil_space_decrypt(
 		srclen = mach_read_from_2(src_frame + FIL_PAGE_DATA);
 	}
 
-	int rc = encryption_scheme_decrypt(src, srclen, dst, &dstlen,
-					   crypt_data, key_version,
-					   space, offset, lsn);
+	if (page_type == FIL_PAGE_ENCRYPTED_RTREE) {
+		int orig_src_len = srclen;
+		srclen = PAGE_BTR_SEG_TOP;
+		int rc = encryption_scheme_decrypt(src, srclen, dst, &dstlen,
+						   crypt_data, key_version,
+						   space, offset, lsn);
+		ut_a(rc == MY_AES_OK);
+		ut_ad(dstlen == srclen);
 
-	if (! ((rc == MY_AES_OK) && ((ulint) dstlen == srclen))) {
+		src += srclen;
+		dst += srclen;
+		rc = encryption_scheme_decrypt(src, 4, dst, &dstlen,
+					       crypt_data, key_version, space,
+					       offset, lsn);
+		ut_a(rc == MY_AES_OK);
+		ut_a(dstlen == 4);
 
-		if (rc == -1) {
-			*err = DB_DECRYPTION_FAILED;
-			return false;
+		src += 4;
+		dst += 4;
+		srclen = orig_src_len - (srclen + 4);
+		rc = encryption_scheme_decrypt(src, srclen, dst, &dstlen,
+						   crypt_data, key_version,
+						   space, offset, lsn);
+		ut_a(rc == MY_AES_OK);
+		ut_ad(dstlen == srclen);
+
+	} else {
+		int rc = encryption_scheme_decrypt(src, srclen, dst, &dstlen,
+						   crypt_data, key_version,
+						   space, offset, lsn);
+
+		if (! ((rc == MY_AES_OK) && ((ulint) dstlen == srclen))) {
+
+			if (rc == -1) {
+				*err = DB_DECRYPTION_FAILED;
+				return false;
+			}
+
+			ib::fatal() << "Unable to decrypt data-block "
+				<< " src: " << src << "srclen: "
+				<< srclen << " buf: " << dst << "buflen: "
+				<< dstlen << " return-code: " << rc
+				<< " Can't continue!";
 		}
 
-		ib::fatal() << "Unable to decrypt data-block "
-			    << " src: " << src << "srclen: "
-			    << srclen << " buf: " << dst << "buflen: "
-			    << dstlen << " return-code: " << rc
-			    << " Can't continue!";
+	}
+
+	if (page_type == FIL_PAGE_ENCRYPTED_RTREE) {
+		ib_uint32_t	ssn_value = mach_read_from_4(
+			tmp_frame + PAGE_HEADER + PAGE_BTR_SEG_TOP);
+
+		if (ssn_id != NULL) {
+			*ssn_id = ssn_value;
+		}
+
+		memcpy(tmp_frame + PAGE_HEADER + PAGE_BTR_SEG_TOP,
+		       tmp_frame + PAGE_HEADER + PAGE_BTR_SEG_LEAF, 4);
+
+		mach_write_to_2(tmp_frame + FIL_PAGE_TYPE, FIL_PAGE_RTREE);
+
+		mach_write_to_4(tmp_frame + FIL_RTREE_SPLIT_SEQ_NUM, 0);
+
+		mach_write_to_4(tmp_frame + FIL_RTREE_SPLIT_SEQ_NUM + 4, ssn_value);
 	}
 
 	/* For compressed tables we do not store the FIL header because

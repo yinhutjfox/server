@@ -491,7 +491,7 @@ struct fil_addr_t {
 //#define FIL_PAGE_COMPRESSED	14
 //#define FIL_PAGE_ENCRYPTED	15
 //#define FIL_PAGE_COMPRESSED_AND_ENCRYPTED 16
-//#define FIL_PAGE_ENCRYPTED_RTREE 17
+#define FIL_PAGE_ENCRYPTED_RTREE 17
 /** Clustered index root page after instant ADD COLUMN */
 #define FIL_PAGE_TYPE_INSTANT	18
 

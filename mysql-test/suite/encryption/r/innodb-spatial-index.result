@@ -1,22 +1,25 @@
 CREATE TABLE t1 (pk INT PRIMARY KEY AUTO_INCREMENT,
 c VARCHAR(256), coordinate POINT NOT NULL, SPATIAL index(coordinate)) ENGINE=INNODB
 ENCRYPTED=YES;
-ERROR HY000: Can't create table `test`.`t1` (errno: 140 "Wrong create options")
+INSERT INTO t1(c, coordinate) values('mysql', ST_GeomFromText('POINT(903994614 180726515)'));
+INSERT INTO t1(c, coordinate) values('mariadb', ST_GeomFromText('POINT(903994614 180726515)'));
+DROP TABLE t1;
 CREATE TABLE t1 (pk INT PRIMARY KEY AUTO_INCREMENT,
 c VARCHAR(256), coordinate POINT NOT NULL, SPATIAL index(coordinate)) ENGINE=INNODB;
 ALTER TABLE t1 ENCRYPTED=YES;
-ERROR HY000: Table storage engine 'InnoDB' does not support the create option 'ENCRYPTED'
 DROP TABLE t1;
 CREATE TABLE t1 (pk INT PRIMARY KEY AUTO_INCREMENT,
 c VARCHAR(256), coordinate POINT NOT NULL) ENCRYPTED=YES ENGINE=INNODB;
 ALTER TABLE t1 ADD SPATIAL INDEX b(coordinate), ALGORITHM=COPY;
-ERROR HY000: Can't create table `test`.`#sql-temporary` (errno: 140 "Wrong create options")
-ALTER TABLE t1 ADD SPATIAL INDEX b(coordinate), FORCE, ALGORITHM=INPLACE;
-ERROR HY000: Table storage engine 'InnoDB' does not support the create option 'ENCRYPTED'
+ALTER TABLE t1 ADD SPATIAL INDEX b1(coordinate), FORCE, ALGORITHM=INPLACE;
+Warnings:
+Note	1831	Duplicate index `b1`. This is deprecated and will be disallowed in a future release
 ALTER TABLE t1 ADD SPATIAL INDEX(coordinate);
-ERROR HY000: Table storage engine 'InnoDB' does not support the create option 'ENCRYPTED'
-CREATE SPATIAL INDEX b on t1(coordinate);
-ERROR HY000: Table storage engine 'InnoDB' does not support the create option 'ENCRYPTED'
+Warnings:
+Note	1831	Duplicate index `coordinate`. This is deprecated and will be disallowed in a future release
+CREATE SPATIAL INDEX b2 on t1(coordinate);
+Warnings:
+Note	1831	Duplicate index `b2`. This is deprecated and will be disallowed in a future release
 DROP TABLE t1;
 CREATE TABLE t1 (pk INT PRIMARY KEY AUTO_INCREMENT,
 c VARCHAR(256), coordinate POINT NOT NULL) ENCRYPTED=DEFAULT ENGINE=INNODB;
@@ -44,4 +47,5 @@ test/t1
 test/t2
 SELECT NAME FROM INFORMATION_SCHEMA.INNODB_TABLESPACES_ENCRYPTION WHERE MIN_KEY_VERSION = 0;
 NAME
+INSERT INTO t1 values(2, 'secret1', ST_GeomFromText('POINT(903994614 180726515)'));
 DROP TABLE t1, t2;
