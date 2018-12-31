@@ -552,6 +552,8 @@ void Json_writer::add_table_name(TABLE_LIST *tab)
     thd->variables.option_bits= save_option_bits;
     add_str(str.c_ptr_safe());
   }
+  else
+    add_null();
 }
 
 void add_table_scan_values_to_trace(Opt_trace_context* trace, JOIN_TAB *tab)

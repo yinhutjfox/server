@@ -7523,7 +7523,6 @@ best_access_path(JOIN      *join,
   else
   {
     trace_access_scan.add_member("type").add_str("scan");
-    trace_access_scan.add_member("cost").add_double(s->read_time);
     trace_access_scan.add_member("chosen").add_bool(false);
     trace_access_scan.add_member("cause").add_str("cost");
   }

@@ -192,4 +192,12 @@ void opt_trace_disable_if_no_stored_proc_func_access(THD *thd, sp_head *sp);
    @retval 1 error
 */
 int fill_optimizer_trace_info(THD *thd, TABLE_LIST *tables, Item *);
+
+#define OPT_TRACE_TRANSFORM(writer, object_level0, object_level1, \
+                            select_number, from, to)             \
+  Json_writer_object object_level0(writer);                         \
+  Json_writer_object object_level1(writer, "transformation");       \
+  object_level1.add_member("select#").add_ll(select_number);                \
+  object_level1.add_member("from").add_str(from);                          \
+  object_level1.add_member("to").add_str(to);
 #endif

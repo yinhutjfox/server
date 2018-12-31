@@ -142,3 +142,26 @@ select * from INFORMATION_SCHEMA.OPTIMIZER_TRACE;
 explain select t1.a from t1 left join (t2 join t3 on t2.b=t3.b) on t2.a=t1.a and t3.a=t1.a;
 select * from INFORMATION_SCHEMA.OPTIMIZER_TRACE;
 drop table t0, t1, t2, t3;
+
+--echo #
+--echo # IN subquery to sem-join is traced
+--echo #
+
+create table t0 (a int);
+insert into t0 values (0),(1),(2),(3),(4),(5),(6),(7),(8),(9);
+
+create table t1(a int, b int);
+insert into t1 values (0,0),(1,1),(2,2);
+create table t2 as select * from t1;
+
+create table t11(a int, b int);
+
+create table t10 (pk int, a int);
+insert into t10 select a,a from t0;
+create table t12 like t10;
+insert into t12 select * from t10;
+
+set optimizer_trace='enabled=on';
+explain extended select * from t1 where a in (select pk from t10);
+select * from INFORMATION_SCHEMA.OPTIMIZER_TRACE;
+drop table t0,t1,t11,t10,t12,t2;
