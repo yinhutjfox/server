@@ -6629,6 +6629,7 @@ static bool fill_alter_inplace_info(THD *thd,
     Go through keys and check if the original ones are compatible
     with new table.
   */
+  uint old_field_len= 0;
   KEY *table_key;
   KEY *table_key_end= table->key_info + table->s->keys;
   KEY *new_key;
@@ -6698,8 +6699,16 @@ static bool fill_alter_inplace_info(THD *thd,
         Key definition has changed if we are using a different field or
         if the user key part length is different.
       */
-      if (key_part->length <= new_part->length &&
-          old_field->pack_length() < new_field->pack_length &&
+      old_field_len= old_field->pack_length();
+
+      if (old_field->type() == MYSQL_TYPE_VARCHAR)
+      {
+        old_field_len= (old_field->pack_length()
+                        - ((Field_varstring*) old_field)->length_bytes);
+      }
+
+      if (key_part->length == old_field_len &&
+          key_part->length <= new_part->length &&
 	  (key_part->field->is_equal((Create_field*) new_field)
            == IS_EQUAL_PACK_LENGTH))
       {

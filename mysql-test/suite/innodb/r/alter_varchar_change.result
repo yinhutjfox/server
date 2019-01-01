@@ -193,7 +193,7 @@ SELECT @tbl1_id = @tbl_id;
 1
 SELECT @idx1_id = @idx_id;
 @idx1_id = @idx_id
-1
+0
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
@@ -312,6 +312,137 @@ t1	CREATE TABLE `t1` (
   `f1` int(11) NOT NULL,
   `f2` char(200) NOT NULL,
   PRIMARY KEY (`f2`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1
+DROP TABLE t1;
+CREATE TABLE t1(f1 INT NOT NULL,
+f2 VARCHAR(100),
+INDEX idx(f2(10)),
+INDEX idx1(f1))ENGINE=InnoDB;
+CALL get_table_id("test/t1", @tbl_id);
+ALTER TABLE t1 MODIFY f2 VARCHAR(50), DROP INDEX idx1;
+CALL get_table_id("test/t1", @tbl1_id);
+SELECT @tbl1_id = @tbl_id;
+@tbl1_id = @tbl_id
+0
+SELECT @idx1_id = @idx_id;
+@idx1_id = @idx_id
+0
+SHOW CREATE TABLE t1;
+Table	Create Table
+t1	CREATE TABLE `t1` (
+  `f1` int(11) NOT NULL,
+  `f2` varchar(50) DEFAULT NULL,
+  KEY `idx` (`f2`(10))
+) ENGINE=InnoDB DEFAULT CHARSET=latin1
+DROP TABLE t1;
+CREATE TABLE t1(f1 INT NOT NULL,
+f2 VARCHAR(100),
+INDEX idx(f2(10)),
+INDEX idx1(f1))ENGINE=InnoDB;
+CALL get_table_id("test/t1", @tbl_id);
+ALTER TABLE t1 MODIFY f2 VARCHAR(5), DROP INDEX idx1;
+CALL get_table_id("test/t1", @tbl1_id);
+SELECT @tbl1_id = @tbl_id;
+@tbl1_id = @tbl_id
+0
+SELECT @idx1_id = @idx_id;
+@idx1_id = @idx_id
+0
+SHOW CREATE TABLE t1;
+Table	Create Table
+t1	CREATE TABLE `t1` (
+  `f1` int(11) NOT NULL,
+  `f2` varchar(5) DEFAULT NULL,
+  KEY `idx` (`f2`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1
+DROP TABLE t1;
+CREATE TABLE t1(f1 INT NOT NULL,
+f2 VARCHAR(100), FULLTEXT idx(f2))ENGINE=InnoDB;
+CALL get_table_id("test/t1", @tbl_id);
+CALL get_index_id(@tbl_id, "idx", @idx_id);
+ALTER TABLE t1 MODIFY f2 VARCHAR(50);
+CALL get_table_id("test/t1", @tbl1_id);
+CALL get_index_id(@tbl1_id, "idx", @idx1_id);
+SELECT @tbl1_id = @tbl_id;
+@tbl1_id = @tbl_id
+0
+SELECT @idx1_id = @idx_id;
+@idx1_id = @idx_id
+0
+SHOW CREATE TABLE t1;
+Table	Create Table
+t1	CREATE TABLE `t1` (
+  `f1` int(11) NOT NULL,
+  `f2` varchar(50) DEFAULT NULL,
+  FULLTEXT KEY `idx` (`f2`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1
+DROP TABLE t1;
+CREATE TABLE t1(f1 INT NOT NULL,
+f2 VARCHAR(100),
+INDEX idx(f2))ENGINE=InnoDB;
+CALL get_table_id("test/t1", @tbl_id);
+ALTER TABLE t1 MODIFY f2 CHAR(200);
+CALL get_table_id("test/t1", @tbl1_id);
+SELECT @tbl1_id = @tbl_id;
+@tbl1_id = @tbl_id
+0
+SHOW CREATE TABLE t1;
+Table	Create Table
+t1	CREATE TABLE `t1` (
+  `f1` int(11) NOT NULL,
+  `f2` char(200) DEFAULT NULL,
+  KEY `idx` (`f2`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1
+DROP TABLE t1;
+CREATE TABLE t1(f1 INT NOT NULL,
+f2 VARCHAR(100),
+INDEX idx(f2(40)))ENGINE=InnoDB;
+CALL get_table_id("test/t1", @tbl_id);
+ALTER TABLE t1 MODIFY f2 TEXT;
+CALL get_table_id("test/t1", @tbl1_id);
+SELECT @tbl1_id = @tbl_id;
+@tbl1_id = @tbl_id
+0
+SHOW CREATE TABLE t1;
+Table	Create Table
+t1	CREATE TABLE `t1` (
+  `f1` int(11) NOT NULL,
+  `f2` text DEFAULT NULL,
+  KEY `idx` (`f2`(40))
+) ENGINE=InnoDB DEFAULT CHARSET=latin1
+DROP TABLE t1;
+CREATE TABLE t1(f1 INT NOT NULL,
+f2 VARCHAR(100),
+INDEX idx(f2(40)))ENGINE=InnoDB;
+CALL get_table_id("test/t1", @tbl_id);
+ALTER TABLE t1 MODIFY f2 VARCHAR(300);
+CALL get_table_id("test/t1", @tbl1_id);
+SELECT @tbl1_id = @tbl_id;
+@tbl1_id = @tbl_id
+0
+SHOW CREATE TABLE t1;
+Table	Create Table
+t1	CREATE TABLE `t1` (
+  `f1` int(11) NOT NULL,
+  `f2` varchar(300) DEFAULT NULL,
+  KEY `idx` (`f2`(40))
+) ENGINE=InnoDB DEFAULT CHARSET=latin1
+DROP TABLE t1;
+CREATE TABLE t1(f1 INT NOT NULL,
+f2 VARCHAR(100),
+INDEX idx(f2(40)))ENGINE=InnoDB;
+CALL get_table_id("test/t1", @tbl_id);
+ALTER TABLE t1 MODIFY f2 VARCHAR(200) CHARACTER SET UTF16;
+CALL get_table_id("test/t1", @tbl1_id);
+SELECT @tbl1_id = @tbl_id;
+@tbl1_id = @tbl_id
+0
+SHOW CREATE TABLE t1;
+Table	Create Table
+t1	CREATE TABLE `t1` (
+  `f1` int(11) NOT NULL,
+  `f2` varchar(200) CHARACTER SET utf16 DEFAULT NULL,
+  KEY `idx` (`f2`(40))
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1
 DROP TABLE t1;
 CREATE TABLE t1(f1 INT NOT NULL,
