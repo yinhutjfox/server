@@ -165,3 +165,31 @@ set optimizer_trace='enabled=on';
 explain extended select * from t1 where a in (select pk from t10);
 select * from INFORMATION_SCHEMA.OPTIMIZER_TRACE;
 drop table t0,t1,t11,t10,t12,t2;
+
+--echo #
+--echo # Selectivities for columns and indexes.
+--echo #
+
+create table t0 (a int);
+insert into t0 values (0),(1),(2),(3),(4),(5),(6),(7),(8),(9);
+
+create table t1 (
+pk int,
+a int,
+b int, 
+key pk(pk),
+key pk_a(pk,a),
+key pk_a_b(pk,a,b));
+insert into t1 select a,a,a from t0;
+
+ANALYZE TABLE t1 PERSISTENT FOR COLUMNS (a,b) INDEXES ();
+set @save_optimizer_use_condition_selectivity=@@optimizer_use_condition_selectivity;
+set @save_use_stat_tables= @@use_stat_tables;
+set @@optimizer_use_condition_selectivity=4;
+set @@use_stat_tables= PREFERABLY;
+set optimizer_trace='enabled=on';
+explain select * from t1 where pk = 2 and a=5 and b=1;
+select * from INFORMATION_SCHEMA.OPTIMIZER_TRACE;
+set @@optimizer_use_condition_selectivity=@save_optimizer_use_condition_selectivity;
+set @@use_stat_tables= @save_use_stat_tables;
+drop table t0,t1;

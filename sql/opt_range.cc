@@ -3238,6 +3238,9 @@ bool calculate_cond_selectivity_for_table(THD *thd, TABLE *table, Item **cond)
   double table_records= (double)table->stat_records(); 
   DBUG_ENTER("calculate_cond_selectivity_for_table");
 
+  Opt_trace_context *const trace = &thd->opt_trace;
+  Json_writer* writer= trace->get_current_json();
+
   table->cond_selectivity= 1.0;
 
   if (!*cond || table_records == 0)
@@ -3259,6 +3262,9 @@ bool calculate_cond_selectivity_for_table(THD *thd, TABLE *table, Item **cond)
     range access estimates are the most precise, we prefer them to any other
     estimate sources.
   */
+
+  Json_writer_object trace_wrapper(writer);
+  Json_writer_array selectivity_for_indexes(writer, "selectivity_for_indexes");
 
   for (keynr= 0;  keynr < table->s->keys; keynr++)
   {
@@ -3309,6 +3315,11 @@ bool calculate_cond_selectivity_for_table(THD *thd, TABLE *table, Item **cond)
             not yet been accounted for.
           */
           table->cond_selectivity*= quick_cond_selectivity;
+          Json_writer_object selectivity_for_index(writer);
+          selectivity_for_index.add_member("index_name")
+                               .add_str(key_info->name);
+          selectivity_for_index.add_member("selectivity_from_range")
+                               .add_double(quick_cond_selectivity);
           if (i != used_key_parts)
 	  {
             /*
@@ -3328,7 +3339,9 @@ bool calculate_cond_selectivity_for_table(THD *thd, TABLE *table, Item **cond)
               */
               selectivity_mult= ((double)(i+1)) / i;
             }
-            table->cond_selectivity*= selectivity_mult;            
+            table->cond_selectivity*= selectivity_mult;
+            selectivity_for_index.add_member("selectivity_multiplier")
+                                 .add_double(selectivity_mult);
           }
           /*
             We need to set selectivity for fields supported by indexes.
@@ -3349,12 +3362,14 @@ bool calculate_cond_selectivity_for_table(THD *thd, TABLE *table, Item **cond)
       }
     }
   }
+  selectivity_for_indexes.end();
    
   /* 
     Second step: calculate the selectivity of the range conditions not 
     supported by any index and selectivity of the range condition
     over the fields whose selectivity has not been set yet.
   */
+  Json_writer_array selectivity_for_columns(writer, "selectivity_for_columns");
 
   if (thd->variables.optimizer_use_condition_selectivity > 2 &&
       !bitmap_is_clear_all(used_fields))
@@ -3413,17 +3428,28 @@ bool calculate_cond_selectivity_for_table(THD *thd, TABLE *table, Item **cond)
       SEL_ARG *key= tree->keys[idx];
       if (key)
       {
+        Json_writer_object selectivity_for_column(writer);
+        selectivity_for_column.add_member("column_name")
+                              .add_str(key->field->field_name);
         if (key->type == SEL_ARG::IMPOSSIBLE)
 	{
           rows= 0;
           table->reginfo.impossible_range= 1;
+          selectivity_for_column.add_member("selectivity_from_range")
+                                .add_double(0);
+          selectivity_for_column.add_member("cause")
+                                .add_str("impossible_range");
           goto free_alloc;
         }          
         else
         {
           rows= records_in_column_ranges(&param, idx, key);
           if (rows != DBL_MAX)
+          {
             key->field->cond_selectivity= rows/table_records;
+            selectivity_for_column.add_member("selectivity_from_range")
+                                  .add_double(key->field->cond_selectivity);
+          }
         }
       }
     }
