@@ -215,7 +215,7 @@ void Json_writer::add_str(const char *str, size_t length)
 
 void Json_writer::add_str(const String &str)
 {
-  add_str(str.ptr());
+  add_str(str.ptr(), str.length());
 }
 
 

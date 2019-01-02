@@ -8023,9 +8023,17 @@ optimize_straight_join(JOIN *join, table_map join_tables)
   uint use_cond_selectivity= 
          join->thd->variables.optimizer_use_condition_selectivity;
   POSITION  loose_scan_pos;
+  Opt_trace_context* const trace= &join->thd->opt_trace;
+  Json_writer* writer= trace->get_current_json();
 
   for (JOIN_TAB **pos= join->best_ref + idx ; (s= *pos) ; pos++)
   {
+    Json_writer_object trace_one_table(writer);
+    if (unlikely(trace->get_current_trace()))
+    {
+      trace_plan_prefix(join, idx, join_tables);
+      trace_one_table.add_member("table").add_table_name(s->tab_list);
+    }
     /* Find the best access method from 's' to the current partial plan */
     best_access_path(join, s, join_tables, idx, disable_jbuf, record_count,
                      join->positions + idx, &loose_scan_pos);
@@ -27035,8 +27043,9 @@ test_if_cheaper_ordering(const JOIN_TAB *tab, ORDER *order, TABLE *table,
   bool group= join && join->group && order == join->group_list;
   ha_rows refkey_rows_estimate= table->quick_condition_rows;
   const bool has_limit= (select_limit_arg != HA_POS_ERROR);
+  THD* thd= join ? join->thd : table->in_use;
 
-  Opt_trace_context *const trace = &join->thd->opt_trace;
+  Opt_trace_context *const trace = &thd->opt_trace;
   Json_writer *writer= trace->get_current_json();
   Json_writer_object trace_wrapper(writer);
   Json_writer_object trace_cheaper_ordering(

@@ -208,9 +208,10 @@ void opt_trace_disable_if_no_stored_proc_func_access(THD *thd, sp_head *sp)
   Opt_trace_context *const trace = &thd->opt_trace;
   if (!trace->is_started())
     return;
+  bool full_access;
   Security_context *const backup_thd_sctx = thd->security_context();
   thd->set_security_context(&thd->main_security_ctx);
-  const bool rc = sp->check_execute_access(thd);
+  const bool rc = check_show_routine_access(thd, sp, &full_access) || !full_access;
   thd->set_security_context(backup_thd_sctx);
   if (rc) trace->missing_privilege();
   return;
@@ -353,6 +354,7 @@ class Opt_trace_stmt {
   {
     delete current_json;
     missing_priv= false;
+    ctx= NULL;
   }
   void set_query(const char *query_ptr, size_t length, const CHARSET_INFO *charset);
   void open_struct(const char *key, char opening_bracket);
@@ -422,6 +424,15 @@ void Opt_trace_context::start(THD *thd, TABLE_LIST *tbl,
                   size_t query_length,
                   const CHARSET_INFO *query_charset)
 {
+  /*
+    This is done currently because we don't want to have multiple
+    traces open at the same time, so as soon as a new trace is created
+    we forcefully end the previous one, if it has not ended by itself.
+    This would mostly happen with stored functions or procedures.
+
+    TODO: handle multiple traces
+  */
+  DBUG_ASSERT(!current_trace);
   current_trace= new Opt_trace_stmt(this);
   if (!inited)
   {
@@ -463,13 +474,14 @@ Opt_trace_start::Opt_trace_start(THD *thd, TABLE_LIST *tbl,
       sql_command_can_be_traced(sql_command) && 
       !list_has_optimizer_trace_table(tbl) &&
       !sets_var_optimizer_trace(sql_command, set_vars) &&
-      !thd->system_thread)
+      !thd->system_thread &&
+      !ctx->is_started())
   {
     ctx->start(thd, tbl, sql_command, query, query_length, query_charset);
     ctx->set_query(query, query_length, query_charset);
     traceable= TRUE;
+    opt_trace_disable_if_no_tables_access(thd, tbl);
   }
-  opt_trace_disable_if_no_tables_access(thd, tbl);
 }
 
 Opt_trace_start::~Opt_trace_start()

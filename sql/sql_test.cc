@@ -276,9 +276,12 @@ void print_keyuse_array_for_trace(Opt_trace_context *trace, DYNAMIC_ARRAY *keyus
     keyuse_elem.add_member("table").add_table_name(keyuse->table->pos_in_table_list);
     keyuse_elem.add_member("field").add_str(
       (keyuse->keypart == FT_KEYPART) ? "<fulltext>"
-                                      : keyuse->table->key_info[keyuse->key]
-                                        .key_part[keyuse->keypart]
-                                        .field->field_name.str);
+                                      : (keyuse->is_for_hash_join()
+                                        ? keyuse->table->field[keyuse->keypart]
+                                                       ->field_name.str
+                                        : keyuse->table->key_info[keyuse->key]
+                                          .key_part[keyuse->keypart]
+                                          .field->field_name.str));
     keyuse_elem.add_member("equals").add_str(keyuse->val);
     keyuse_elem.add_member("null_rejecting").add_bool(keyuse->null_rejecting);
   }

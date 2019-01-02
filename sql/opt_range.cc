@@ -2276,6 +2276,7 @@ void TRP_RANGE::trace_basic_info(const PARAM *param,
   DBUG_ASSERT(key);
 
   String range_info;
+  range_info.length(0);
   range_info.set_charset(system_charset_info);
   append_range_all_keyparts(&trace_range, NULL, &range_info, key, key_part);
 }
@@ -15782,7 +15783,7 @@ static void append_range_all_keyparts(Json_writer_array *range_trace,
     else
     {
       range_trace->get_value_context()
-                  .add_str(range_so_far->c_ptr(), range_so_far->length());
+                  .add_str(*range_so_far);
     }
     keypart_range= keypart_range->next;
     range_so_far->length(save_range_so_far_length);
