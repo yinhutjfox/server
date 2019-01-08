@@ -566,8 +566,6 @@ handle_slave_background(void *arg __attribute__((unused)))
 
   delete thd;
   thread_safe_decrement32(&service_thread_count);
-  signal_thd_deleted();
-
   my_thread_end();
   return 0;
 }
@@ -5053,8 +5051,6 @@ err_during_init:
   thd->assert_not_linked();
   delete thd;
   thread_safe_decrement32(&service_thread_count);
-  signal_thd_deleted();
-
   mi->abort_slave= 0;
   mi->slave_running= MYSQL_SLAVE_NOT_RUN;
   mi->io_thd= 0;
@@ -5736,7 +5732,6 @@ err_during_init:
   delete serial_rgi;
   delete thd;
   thread_safe_decrement32(&service_thread_count);
-  signal_thd_deleted();
 
   DBUG_LEAVE;                                   // Must match DBUG_ENTER()
   my_thread_end();

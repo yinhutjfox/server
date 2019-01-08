@@ -531,7 +531,7 @@ void adjust_linfo_offsets(my_off_t purge_offset)
 {
   THD *tmp;
 
-  mysql_mutex_lock(&LOCK_thread_count);
+  mysql_rwlock_rdlock(&LOCK_thread_count);
   I_List_iterator<THD> it(threads);
 
   while ((tmp=it++))
@@ -552,7 +552,7 @@ void adjust_linfo_offsets(my_off_t purge_offset)
       mysql_mutex_unlock(&linfo->lock);
     }
   }
-  mysql_mutex_unlock(&LOCK_thread_count);
+  mysql_rwlock_unlock(&LOCK_thread_count);
 }
 
 
@@ -562,7 +562,7 @@ bool log_in_use(const char* log_name)
   THD *tmp;
   bool result = 0;
 
-  mysql_mutex_lock(&LOCK_thread_count);
+  mysql_rwlock_rdlock(&LOCK_thread_count);
   I_List_iterator<THD> it(threads);
 
   while ((tmp=it++))
@@ -578,7 +578,7 @@ bool log_in_use(const char* log_name)
     }
   }
 
-  mysql_mutex_unlock(&LOCK_thread_count);
+  mysql_rwlock_unlock(&LOCK_thread_count);
   return result;
 }
 
@@ -3371,7 +3371,7 @@ err:
 
 void kill_zombie_dump_threads(uint32 slave_server_id)
 {
-  mysql_mutex_lock(&LOCK_thread_count);
+  mysql_rwlock_rdlock(&LOCK_thread_count);
   I_List_iterator<THD> it(threads);
   THD *tmp;
 
@@ -3384,7 +3384,7 @@ void kill_zombie_dump_threads(uint32 slave_server_id)
       break;
     }
   }
-  mysql_mutex_unlock(&LOCK_thread_count);
+  mysql_rwlock_unlock(&LOCK_thread_count);
   if (tmp)
   {
     /*

@@ -760,7 +760,7 @@ THD::THD(my_thread_id id, bool is_wsrep_applier, bool skip_global_sys_var_lock)
     LOCK_thread_count goes before LOCK_thd_data - the former is called around
     'delete thd', the latter - in THD::~THD
   */
-  mysql_mutex_record_order(&LOCK_thread_count, &LOCK_thd_data);
+  //mysql_mutex_record_order(&LOCK_thread_count, &LOCK_thd_data);
 
   /* Variables with default values */
   proc_info="login";
@@ -1594,7 +1594,7 @@ THD::~THD()
   /* Check that we have already called thd->unlink() */
   DBUG_ASSERT(prev == 0 && next == 0);
   /* This takes a long time so we should not do this under LOCK_thread_count */
-  mysql_mutex_assert_not_owner(&LOCK_thread_count);
+  //mysql_mutex_assert_not_owner(&LOCK_thread_count);
 
   /*
     In error cases, thd may not be current thd. We have to fix this so

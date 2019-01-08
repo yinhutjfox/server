@@ -686,12 +686,12 @@ Event_scheduler::workers_count()
   uint count= 0;
 
   DBUG_ENTER("Event_scheduler::workers_count");
-  mysql_mutex_lock(&LOCK_thread_count);       // For unlink from list
+  mysql_rwlock_rdlock(&LOCK_thread_count);
   I_List_iterator<THD> it(threads);
   while ((tmp=it++))
     if (tmp->system_thread == SYSTEM_THREAD_EVENT_WORKER)
       ++count;
-  mysql_mutex_unlock(&LOCK_thread_count);
+  mysql_rwlock_unlock(&LOCK_thread_count);
   DBUG_PRINT("exit", ("%d", count));
   DBUG_RETURN(count);
 }

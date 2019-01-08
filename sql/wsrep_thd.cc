@@ -400,10 +400,9 @@ static void wsrep_replication_process(THD *thd)
     break;
   }
 
-  mysql_mutex_lock(&LOCK_thread_count);
+  mysql_rwlock_wrlock(&LOCK_thread_count);
   wsrep_close_applier(thd);
-  mysql_cond_broadcast(&COND_thread_count);
-  mysql_mutex_unlock(&LOCK_thread_count);
+  mysql_rwlock_wrlock(&LOCK_thread_count);
 
   if(thd->has_thd_temporary_tables())
   {
@@ -418,7 +417,6 @@ static bool create_wsrep_THD(wsrep_thd_processor_fun processor)
 {
   ulong old_wsrep_running_threads= wsrep_running_threads;
   pthread_t unused;
-  mysql_mutex_lock(&LOCK_thread_count);
   bool res= pthread_create(&unused, &connection_attrib, start_wsrep_THD,
                            (void*)processor);
   /*
@@ -426,10 +424,9 @@ static bool create_wsrep_THD(wsrep_thd_processor_fun processor)
     is fully initialized (otherwise a THD initialization code might
     try to access a partially initialized server data structure - MDEV-8208).
   */
-  if (!mysqld_server_initialized)
+  if (!res && !mysqld_server_initialized)
     while (old_wsrep_running_threads == wsrep_running_threads)
-      mysql_cond_wait(&COND_thread_count, &LOCK_thread_count);
-  mysql_mutex_unlock(&LOCK_thread_count);
+      my_sleep(100);
   return res;
 }
 

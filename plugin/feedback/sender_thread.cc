@@ -90,9 +90,9 @@ static int prepare_for_fill(TABLE_LIST *tables)
     in SHOW STATUS and we want to avoid skewing the statistics)
   */
   thd->variables.pseudo_thread_id= thd->thread_id;
-  mysql_mutex_lock(&LOCK_thread_count);
+  mysql_rwlock_wrlock(&LOCK_thread_count);
   threads.append(thd);
-  mysql_mutex_unlock(&LOCK_thread_count);
+  mysql_rwlock_unlock(&LOCK_thread_count);
   thd->thread_stack= (char*) &tables;
   if (thd->store_globals())
     return 1;
@@ -258,12 +258,11 @@ ret:
       reset all thread local status variables to minimize
       the effect of the background thread on SHOW STATUS.
     */
-    mysql_mutex_lock(&LOCK_thread_count);
+    mysql_rwlock_wrlock(&LOCK_thread_count);
     thd->set_status_var_init();
     thd->killed= KILL_CONNECTION;
     thd->unlink();
-    mysql_cond_broadcast(&COND_thread_count);
-    mysql_mutex_unlock(&LOCK_thread_count);
+    mysql_rwlock_unlock(&LOCK_thread_count);
     delete thd;
     thd= 0;
   }

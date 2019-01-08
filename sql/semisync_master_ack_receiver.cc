@@ -285,7 +285,6 @@ end:
   m_status= ST_DOWN;
   delete thd;
   thread_safe_decrement32(&service_thread_count);
-  signal_thd_deleted();
   mysql_cond_broadcast(&m_cond);
   mysql_mutex_unlock(&m_mutex);
   DBUG_VOID_RETURN;

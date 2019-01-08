@@ -2184,11 +2184,11 @@ public:
     mysql_mutex_init(key_delayed_insert_mutex, &mutex, MY_MUTEX_INIT_FAST);
     mysql_cond_init(key_delayed_insert_cond, &cond, NULL);
     mysql_cond_init(key_delayed_insert_cond_client, &cond_client, NULL);
-    mysql_mutex_lock(&LOCK_thread_count);
+    mysql_rwlock_wrlock(&LOCK_thread_count);
     delayed_insert_threads++;
     delayed_lock= global_system_variables.low_priority_updates ?
                                           TL_WRITE_LOW_PRIORITY : TL_WRITE;
-    mysql_mutex_unlock(&LOCK_thread_count);
+    mysql_rwlock_unlock(&LOCK_thread_count);
     DBUG_VOID_RETURN;
   }
   ~Delayed_insert()
@@ -2211,10 +2211,10 @@ public:
       delayed_insert_threads also needs to be protected by
       the LOCK_thread_count mutex, we open code this.
     */
-    mysql_mutex_lock(&LOCK_thread_count);
+    mysql_rwlock_wrlock(&LOCK_thread_count);
     thd.unlink();				// Must be unlinked under lock
     delayed_insert_threads--;
-    mysql_mutex_unlock(&LOCK_thread_count);
+    mysql_rwlock_unlock(&LOCK_thread_count);
 
     my_free(thd.query());
     thd.security_ctx->user= 0;

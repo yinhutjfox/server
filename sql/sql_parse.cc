@@ -1086,22 +1086,6 @@ static void handle_bootstrap_impl(THD *thd)
 }
 
 
-/**
-  Execute commands from bootstrap_file.
-
-  Used when creating the initial grant tables.
-*/
-
-pthread_handler_t handle_bootstrap(void *arg)
-{
-  THD *thd=(THD*) arg;
-
-  mysql_thread_set_psi_id(thd->thread_id);
-
-  do_handle_bootstrap(thd);
-  return 0;
-}
-
 void do_handle_bootstrap(THD *thd)
 {
   /* The following must be called before DBUG_ENTER */
@@ -1120,15 +1104,10 @@ void do_handle_bootstrap(THD *thd)
 end:
   delete thd;
 
-  mysql_mutex_lock(&LOCK_thread_count);
+  //mysql_mutex_lock(&LOCK_thread_count);
   in_bootstrap = FALSE;
-  mysql_cond_broadcast(&COND_thread_count);
-  mysql_mutex_unlock(&LOCK_thread_count);
-
-#ifndef EMBEDDED_LIBRARY
-  my_thread_end();
-  pthread_exit(0);
-#endif
+  //mysql_cond_broadcast(&COND_thread_count);
+  //mysql_rwlock_unlock(&LOCK_thread_count);
 
   return;
 }
@@ -8941,7 +8920,7 @@ void add_join_natural(TABLE_LIST *a, TABLE_LIST *b, List<String> *using_fields,
 THD *find_thread_by_id(longlong id, bool query_id)
 {
   THD *tmp;
-  mysql_mutex_lock(&LOCK_thread_count); // For unlink from list
+  mysql_rwlock_rdlock(&LOCK_thread_count); // For unlink from list
   I_List_iterator<THD> it(threads);
   while ((tmp=it++))
   {
@@ -8953,7 +8932,7 @@ THD *find_thread_by_id(longlong id, bool query_id)
       break;
     }
   }
-  mysql_mutex_unlock(&LOCK_thread_count);
+  mysql_rwlock_unlock(&LOCK_thread_count);
   return tmp;
 }
 
@@ -9047,7 +9026,7 @@ static uint kill_threads_for_user(THD *thd, LEX_USER *user,
   DBUG_PRINT("enter", ("user: %s  signal: %u", user->user.str,
                        (uint) kill_signal));
 
-  mysql_mutex_lock(&LOCK_thread_count); // For unlink from list
+  mysql_rwlock_rdlock(&LOCK_thread_count); // For unlink from list
   I_List_iterator<THD> it(threads);
   while ((tmp=it++))
   {
@@ -9065,14 +9044,14 @@ static uint kill_threads_for_user(THD *thd, LEX_USER *user,
       if (!(thd->security_ctx->master_access & SUPER_ACL) &&
           !thd->security_ctx->user_matches(tmp->security_ctx))
       {
-        mysql_mutex_unlock(&LOCK_thread_count);
+        mysql_rwlock_unlock(&LOCK_thread_count);
         DBUG_RETURN(ER_KILL_DENIED_ERROR);
       }
       if (!threads_to_kill.push_back(tmp, thd->mem_root))
         mysql_mutex_lock(&tmp->LOCK_thd_kill); // Lock from delete
     }
   }
-  mysql_mutex_unlock(&LOCK_thread_count);
+  mysql_rwlock_unlock(&LOCK_thread_count);
   if (!threads_to_kill.is_empty())
   {
     List_iterator_fast<THD> it2(threads_to_kill);

@@ -86,7 +86,6 @@ void kill_mysql(THD *thd= 0);
 void close_connection(THD *thd, uint sql_errno= 0);
 void handle_connection_in_main_thread(CONNECT *thd);
 void create_thread_to_handle_connection(CONNECT *connect);
-void signal_thd_deleted();
 void unlink_thd(THD *thd);
 bool one_thread_per_connection_end(THD *thd, bool put_in_cache);
 void flush_thread_cache();
@@ -629,7 +628,7 @@ extern mysql_mutex_t
        LOCK_global_system_variables, LOCK_user_conn,
        LOCK_prepared_stmt_count, LOCK_error_messages, LOCK_connection_count,
        LOCK_slave_background;
-extern MYSQL_PLUGIN_IMPORT mysql_mutex_t LOCK_thread_count;
+extern MYSQL_PLUGIN_IMPORT mysql_rwlock_t LOCK_thread_count;
 extern mysql_mutex_t LOCK_start_thread;
 #ifdef HAVE_OPENSSL
 extern char* des_key_file;

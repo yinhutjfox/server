@@ -582,7 +582,7 @@ static void timeout_check(pool_timer_t *timer)
 {
   DBUG_ENTER("timeout_check");
   
-  mysql_mutex_lock(&LOCK_thread_count);
+  mysql_rwlock_rdlock(&LOCK_thread_count);
   I_List_iterator<THD> it(threads);
 
   /* Reset next timeout check, it will be recalculated in the loop below */
@@ -613,7 +613,7 @@ static void timeout_check(pool_timer_t *timer)
       set_next_timeout_check(connection->abs_wait_timeout);
     }
   }
-  mysql_mutex_unlock(&LOCK_thread_count);
+  mysql_rwlock_unlock(&LOCK_thread_count);
   DBUG_VOID_RETURN;
 }
 

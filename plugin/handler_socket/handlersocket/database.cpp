@@ -341,10 +341,10 @@ dbcontext::term_thread()
   close_tables_if();
   my_pthread_setspecific_ptr(THR_THD, 0);
   {
-    pthread_mutex_lock(&LOCK_thread_count);
+    mysql_rwlock_wrlock(&LOCK_thread_count);
     delete thd;
     thd = 0;
-    pthread_mutex_unlock(&LOCK_thread_count);
+    mysql_rwlock_unlock(&LOCK_thread_count);
     my_thread_end();
   }
 }

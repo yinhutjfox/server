@@ -432,11 +432,11 @@ int emb_unbuffered_fetch(MYSQL *mysql, char **row)
 static void emb_free_embedded_thd(MYSQL *mysql)
 {
   THD *thd= (THD*)mysql->thd;
-  mysql_mutex_lock(&LOCK_thread_count);
+  mysql_rwlock_wrlock(&LOCK_thread_count);
   thd->clear_data_list();
   thd->store_globals();
   thd->unlink();
-  mysql_mutex_unlock(&LOCK_thread_count);
+  mysql_rwlock_unlock(&LOCK_thread_count);
   delete thd;
   my_pthread_setspecific_ptr(THR_THD,  0);
   mysql->thd=0;
@@ -712,9 +712,9 @@ void *create_embedded_thd(int client_flag)
   thd->data_tail= &thd->first_data;
   bzero((char*) &thd->net, sizeof(thd->net));
 
-  mysql_mutex_lock(&LOCK_thread_count);
+  mysql_rwlock_wrlock(&LOCK_thread_count);
   threads.append(thd);
-  mysql_mutex_unlock(&LOCK_thread_count);
+  mysql_rwlock_unlock(&LOCK_thread_count);
   thd->mysys_var= 0;
   thd->reset_globals();
   return thd;
