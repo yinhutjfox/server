@@ -2282,6 +2282,8 @@ int Field::store_time_dec(const MYSQL_TIME *ltime, uint dec)
 
 bool Field::optimize_range(uint idx, uint part) const
 {
+  if (table->key_info[idx].algorithm == HA_KEY_ALG_LONG_HASH)
+    return false;
   return MY_TEST(table->file->index_flags(idx, part, 1) & HA_READ_RANGE);
 }
 

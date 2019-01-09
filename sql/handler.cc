@@ -158,6 +158,9 @@ handlerton *ha_default_tmp_handlerton(THD *thd)
   return hton;
 }
 
+static int check_duplicate_long_entry_key(TABLE *table, handler *h, uchar *new_rec,
+                                   uint key_no);
+int read_long_unique_index(TABLE *table, uint index, const uchar *key);
 
 /** @brief
   Return the storage engine handlerton for the supplied name
@@ -2854,8 +2857,11 @@ int handler::ha_index_read_map(uchar *buf, const uchar *key,
   DBUG_ASSERT(table_share->tmp_table != NO_TMP_TABLE ||
               m_lock_type != F_UNLCK);
   DBUG_ASSERT(inited==INDEX);
-
-  TABLE_IO_WAIT(tracker, m_psi, PSI_TABLE_FETCH_ROW, active_index, 0,
+  if (table->key_info[active_index].algorithm == HA_KEY_ALG_LONG_HASH
+       && !(table->key_info[active_index].key_part->field->flags & LONG_UNIQUE_HASH_FIELD))
+    read_long_unique_index(table, active_index, key);
+  else
+    TABLE_IO_WAIT(tracker, m_psi, PSI_TABLE_FETCH_ROW, active_index, 0,
     { result= index_read_map(buf, key, keypart_map, find_flag); })
   increment_statistics(&SSV::ha_read_key_count);
   if (!result)
@@ -2867,7 +2873,26 @@ int handler::ha_index_read_map(uchar *buf, const uchar *key,
   table->status=result ? STATUS_NOT_FOUND: 0;
   DBUG_RETURN(result);
 }
-
+int read_long_unique_index(TABLE *table, uint index, const uchar *key)
+{
+  KEY *key_info= table->key_info + index;
+  KEY_PART_INFO *key_part;
+  Field *field;
+  //Copy key to table->record , So that we can get long_unique_key
+  re_setup_keyinfo_hash(key_info);
+  key_part= key_info->key_part;
+  for (uint i= 0; i < key_info->user_defined_key_parts; i++)
+  {
+    field= key_part->field;
+    memcpy(field->ptr, key + key_part->offset, field->pack_length());
+    field->set_notnull();
+    key_part++;
+  }
+  setup_keyinfo_hash(key_info);
+  field= key_info->key_part->field;
+  table->update_virtual_field(field);
+  return check_duplicate_long_entry_key(table, table->file, table->record[0], index);
+}
 /*
   @note: Other index lookup/navigation functions require prior
   handler->index_init() call. This function is different, it requires
@@ -2883,6 +2908,8 @@ int handler::ha_index_read_idx_map(uchar *buf, uint index, const uchar *key,
   DBUG_ASSERT(table_share->tmp_table != NO_TMP_TABLE ||
               m_lock_type != F_UNLCK);
   DBUG_ASSERT(end_range == NULL);
+  if (table->key_info[index].algorithm == HA_KEY_ALG_LONG_HASH)
+    read_long_unique_index(table, index, key);
   TABLE_IO_WAIT(tracker, m_psi, PSI_TABLE_FETCH_ROW, index, 0,
     { result= index_read_idx_map(buf, index, key, keypart_map, find_flag); })
   increment_statistics(&SSV::ha_read_key_count);
