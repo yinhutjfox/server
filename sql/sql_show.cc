@@ -3376,7 +3376,7 @@ int add_status_vars(SHOW_VAR *list)
 {
   int res= 0;
   if (status_vars_inited)
-    mysql_mutex_lock(&LOCK_show_status);
+    mysql_rwlock_wrlock(&LOCK_show_status);
   if (!all_status_vars.buffer && // array is not allocated yet - do it now
       my_init_dynamic_array(&all_status_vars, sizeof(SHOW_VAR), 250, 50, MYF(0)))
   {
@@ -3391,7 +3391,7 @@ int add_status_vars(SHOW_VAR *list)
     sort_dynamic(&all_status_vars, show_var_cmp);
 err:
   if (status_vars_inited)
-    mysql_mutex_unlock(&LOCK_show_status);
+    mysql_rwlock_unlock(&LOCK_show_status);
   return res;
 }
 
@@ -3453,7 +3453,7 @@ void remove_status_vars(SHOW_VAR *list)
 {
   if (status_vars_inited)
   {
-    mysql_mutex_lock(&LOCK_show_status);
+    mysql_rwlock_wrlock(&LOCK_show_status);
     SHOW_VAR *all= dynamic_element(&all_status_vars, 0, SHOW_VAR *);
 
     for (; list->name; list++)
@@ -3474,7 +3474,7 @@ void remove_status_vars(SHOW_VAR *list)
       }
     }
     shrink_var_array(&all_status_vars);
-    mysql_mutex_unlock(&LOCK_show_status);
+    mysql_rwlock_unlock(&LOCK_show_status);
   }
   else
   {
@@ -7826,18 +7826,15 @@ int fill_status(THD *thd, TABLE_LIST *tables, COND *cond)
 
   if (scope == OPT_GLOBAL)
   {
-    /* We only hold LOCK_status for summary status vars */
-    mysql_mutex_lock(&LOCK_status);
     calc_sum_of_all_status(&tmp);
-    mysql_mutex_unlock(&LOCK_status);
   }
 
-  mysql_mutex_lock(&LOCK_show_status);
+  mysql_rwlock_rdlock(&LOCK_show_status);
   res= show_status_array(thd, wild,
                          (SHOW_VAR *)all_status_vars.buffer,
                          scope, tmp1, "", tables->table,
                          upper_case_names, partial_cond);
-  mysql_mutex_unlock(&LOCK_show_status);
+  mysql_rwlock_unlock(&LOCK_show_status);
   DBUG_RETURN(res);
 }
 

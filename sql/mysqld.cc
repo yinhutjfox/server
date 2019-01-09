@@ -743,13 +743,12 @@ mysql_mutex_t  LOCK_start_thread;
 
 mysql_mutex_t LOCK_thread_cache;
 mysql_mutex_t
-  LOCK_status, LOCK_show_status, LOCK_error_log, LOCK_short_uuid_generator,
+  LOCK_status, LOCK_error_log, LOCK_short_uuid_generator,
   LOCK_delayed_insert, LOCK_delayed_status, LOCK_delayed_create,
   LOCK_crypt,
   LOCK_global_system_variables,
   LOCK_user_conn, LOCK_slave_list,
   LOCK_connection_count, LOCK_error_messages, LOCK_slave_background;
-
 mysql_mutex_t LOCK_stats, LOCK_global_user_client_stats,
               LOCK_global_table_stats, LOCK_global_index_stats;
 
@@ -772,6 +771,7 @@ mysql_mutex_t LOCK_des_key_file;
 #endif
 mysql_rwlock_t LOCK_grant, LOCK_sys_init_connect, LOCK_sys_init_slave;
 mysql_rwlock_t LOCK_ssl_refresh;
+mysql_rwlock_t LOCK_show_status;
 mysql_prlock_t LOCK_system_variables_hash;
 mysql_cond_t COND_start_thread;
 pthread_t signal_thread;
@@ -1037,7 +1037,8 @@ PSI_rwlock_key key_rwlock_LOCK_grant, key_rwlock_LOCK_logger,
   key_LOCK_SEQUENCE,
   key_rwlock_LOCK_vers_stats, key_rwlock_LOCK_stat_serial,
   key_rwlock_LOCK_ssl_refresh,
-  key_rwlock_LOCK_thread_count;
+  key_rwlock_LOCK_thread_count,
+  key_rwlock_LOCK_show_status;
 
 static PSI_rwlock_info all_server_rwlocks[]=
 {
@@ -1053,7 +1054,9 @@ static PSI_rwlock_info all_server_rwlocks[]=
   { &key_rwlock_query_cache_query_lock, "Query_cache_query::lock", 0},
   { &key_rwlock_LOCK_vers_stats, "Vers_field_stats::lock", 0},
   { &key_rwlock_LOCK_stat_serial, "TABLE_SHARE::LOCK_stat_serial", 0},
-  { &key_rwlock_LOCK_ssl_refresh, "LOCK_ssl_refresh", PSI_FLAG_GLOBAL }
+  { &key_rwlock_LOCK_ssl_refresh, "LOCK_ssl_refresh", PSI_FLAG_GLOBAL },
+  { &key_rwlock_LOCK_show_status, "LOCK_show_status", PSI_FLAG_GLOBAL },
+  { &key_rwlock_LOCK_thread_count, "LOCK_thread_count", PSI_FLAG_GLOBAL },
 };
 
 #ifdef HAVE_MMAP
@@ -2249,7 +2252,7 @@ static void clean_up_mutexes()
   mysql_mutex_destroy(&LOCK_thread_cache);
   mysql_mutex_destroy(&LOCK_start_thread);
   mysql_mutex_destroy(&LOCK_status);
-  mysql_mutex_destroy(&LOCK_show_status);
+  mysql_rwlock_destroy(&LOCK_show_status);
   mysql_mutex_destroy(&LOCK_delayed_insert);
   mysql_mutex_destroy(&LOCK_delayed_status);
   mysql_mutex_destroy(&LOCK_delayed_create);
@@ -4600,7 +4603,6 @@ static int init_thread_environment()
   mysql_mutex_init(key_LOCK_thread_cache, &LOCK_thread_cache, MY_MUTEX_INIT_FAST);
   mysql_mutex_init(key_LOCK_start_thread, &LOCK_start_thread, MY_MUTEX_INIT_FAST);
   mysql_mutex_init(key_LOCK_status, &LOCK_status, MY_MUTEX_INIT_FAST);
-  mysql_mutex_init(key_LOCK_show_status, &LOCK_show_status, MY_MUTEX_INIT_SLOW);
   mysql_mutex_init(key_LOCK_delayed_insert,
                    &LOCK_delayed_insert, MY_MUTEX_INIT_FAST);
   mysql_mutex_init(key_LOCK_delayed_status,
@@ -4663,6 +4665,7 @@ static int init_thread_environment()
   mysql_rwlock_init(key_rwlock_LOCK_ssl_refresh, &LOCK_ssl_refresh);
   mysql_rwlock_init(key_rwlock_LOCK_grant, &LOCK_grant);
   mysql_rwlock_init(key_rwlock_LOCK_thread_count, &LOCK_thread_count);
+  mysql_rwlock_init(key_LOCK_show_status, &LOCK_show_status);
   mysql_cond_init(key_COND_thread_cache, &COND_thread_cache, NULL);
   mysql_cond_init(key_COND_start_thread, &COND_start_thread, NULL);
   mysql_cond_init(key_COND_flush_thread_cache, &COND_flush_thread_cache, NULL);
