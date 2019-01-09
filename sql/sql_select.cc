@@ -6060,7 +6060,7 @@ add_key_part(DYNAMIC_ARRAY *keyuse_array, KEY_FIELD *key_field)
       uint key_parts= form->actual_n_key_parts(keyinfo);
       if (keyinfo->algorithm == HA_KEY_ALG_LONG_HASH)
       {
-        re_setup_keyinfo_hash(keyinfo);
+        setup_keyinfo_hash(keyinfo);
         key_parts= keyinfo->user_defined_key_parts;
       }
       for (uint part=0 ; part <  key_parts ; part++)
@@ -6071,13 +6071,13 @@ add_key_part(DYNAMIC_ARRAY *keyuse_array, KEY_FIELD *key_field)
           if (add_keyuse(keyuse_array, key_field, key, part))
           {
             if (keyinfo->algorithm == HA_KEY_ALG_LONG_HASH)
-              setup_keyinfo_hash(keyinfo);
+              re_setup_keyinfo_hash(keyinfo);
             return TRUE;
           }
 	}
       }
       if (keyinfo->algorithm == HA_KEY_ALG_LONG_HASH)
-        setup_keyinfo_hash(keyinfo);
+        re_setup_keyinfo_hash(keyinfo);
     }
     if (field->hash_join_is_possible() &&
         (key_field->optimize & KEY_OPTIMIZE_EQ) &&

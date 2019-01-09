@@ -317,6 +317,7 @@ enum ha_base_keytype {
 
 #define HA_BIT_PART		1024
 #define HA_CAN_MEMCMP           2048 /* internal, never stored in frm */
+#define LONG_UNIQUE_KEYPART     4096 /* internal, flag for long unique keyparts */
 
 	/* optionbits for database */
 #define HA_OPTION_PACK_RECORD		1U

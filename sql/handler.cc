@@ -2879,7 +2879,7 @@ int read_long_unique_index(TABLE *table, uint index, const uchar *key)
   KEY_PART_INFO *key_part;
   Field *field;
   //Copy key to table->record , So that we can get long_unique_key
-  re_setup_keyinfo_hash(key_info);
+  setup_keyinfo_hash(key_info);
   key_part= key_info->key_part;
   for (uint i= 0; i < key_info->user_defined_key_parts; i++)
   {
@@ -2888,7 +2888,7 @@ int read_long_unique_index(TABLE *table, uint index, const uchar *key)
     field->set_notnull();
     key_part++;
   }
-  setup_keyinfo_hash(key_info);
+  re_setup_keyinfo_hash(key_info);
   field= key_info->key_part->field;
   table->update_virtual_field(field);
   return check_duplicate_long_entry_key(table, table->file, table->record[0], index);
