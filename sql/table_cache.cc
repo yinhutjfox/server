@@ -1134,6 +1134,11 @@ void tdc_assign_new_table_id(TABLE_SHARE *share)
   DBUG_ASSERT(share);
   DBUG_ASSERT(tdc_inited);
 
+#ifndef DBUG_OFF
+  DBUG_EXECUTE_IF("simulate_big_table_id",
+                  if (last_table_id < (int64) (1ULL << 32) - 1)
+                    last_table_id= (1ULL << 32) - 1;);
+#endif
   /*
     There is one reserved number that cannot be used.  Remember to
     change this when 6-byte global table id's are introduced.
