@@ -2695,23 +2695,20 @@ row_sel_convert_mysql_key_to_innobase(
 /**************************************************************//**
 Stores a non-SQL-NULL field in the MySQL format. The counterpart of this
 function is row_mysql_store_col_in_innobase_format() in row0mysql.cc. */
-void
-row_sel_field_store_in_mysql_format_func(
+void row_sel_field_store_in_mysql_format(
 	byte*		dest,
 	const mysql_row_templ_t* templ,
-#ifdef UNIV_DEBUG
 	const dict_index_t* index,
 	ulint		field_no,
-#endif /* UNIV_DEBUG */
 	const byte*	data,
-	ulint		len)
+	ulint		len,
+	bool		comp)
 {
 	byte*			ptr;
-#ifdef UNIV_DEBUG
 	const dict_field_t*	field
 		= templ->is_virtual
 			 ? NULL : dict_index_get_nth_field(index, field_no);
-#endif /* UNIV_DEBUG */
+	uint16_t unsigned_len;
 
 	ut_ad(len != UNIV_SQL_NULL);
 	UNIV_MEM_ASSERT_RW(data, len);
@@ -2736,16 +2733,19 @@ row_sel_field_store_in_mysql_format_func(
 			data++;
 		}
 
-		if (!templ->is_unsigned) {
+		unsigned_len = field ? field->col->unsigned_len : 0;
+
+		if (!templ->is_unsigned && len > unsigned_len) {
 			dest[len - 1] = (byte) (dest[len - 1] ^ 128);
 		}
 
-		ut_ad(templ->mysql_col_len == len);
+		ut_ad(templ->mysql_col_len == len || !comp);
 		break;
 
 	case DATA_VARCHAR:
 	case DATA_VARMYSQL:
 	case DATA_BINARY:
+	case DATA_CHAR:
 		field_end = dest + templ->mysql_col_len;
 
 		if (templ->mysql_type == DATA_MYSQL_TRUE_VARCHAR) {
@@ -2855,7 +2855,6 @@ row_sel_field_store_in_mysql_format_func(
 		ut_ad(0);
 		/* fall through */
 
-	case DATA_CHAR:
 	case DATA_FIXBINARY:
 	case DATA_FLOAT:
 	case DATA_DOUBLE:
@@ -2870,15 +2869,6 @@ row_sel_field_store_in_mysql_format_func(
 	}
 }
 
-#ifdef UNIV_DEBUG
-/** Convert a field from Innobase format to MySQL format. */
-# define row_sel_store_mysql_field(m,p,r,i,o,f,t) \
-	row_sel_store_mysql_field_func(m,p,r,i,o,f,t)
-#else /* UNIV_DEBUG */
-/** Convert a field from Innobase format to MySQL format. */
-# define row_sel_store_mysql_field(m,p,r,i,o,f,t) \
-	row_sel_store_mysql_field_func(m,p,r,o,f,t)
-#endif /* UNIV_DEBUG */
 /** Convert a field in the Innobase format to a field in the MySQL format.
 @param[out]	mysql_rec		record in the MySQL format
 @param[in,out]	prebuilt		prebuilt struct
@@ -2892,14 +2882,11 @@ row_sel_field_store_in_mysql_format_func(
 @param[in]	templ			row template
 */
 static MY_ATTRIBUTE((warn_unused_result))
-ibool
-row_sel_store_mysql_field_func(
+bool row_sel_store_mysql_field(
 	byte*			mysql_rec,
 	row_prebuilt_t*		prebuilt,
 	const rec_t*		rec,
-#ifdef UNIV_DEBUG
 	const dict_index_t*	index,
-#endif
 	const ulint*		offsets,
 	ulint			field_no,
 	const mysql_row_templ_t*templ)
@@ -2957,14 +2944,15 @@ row_sel_store_mysql_field_func(
 
 			ut_a(prebuilt->trx->isolation_level
 			     == TRX_ISO_READ_UNCOMMITTED);
-			DBUG_RETURN(FALSE);
+			DBUG_RETURN(false);
 		}
 
 		ut_a(len != UNIV_SQL_NULL);
 
 		row_sel_field_store_in_mysql_format(
 			mysql_rec + templ->mysql_col_offset,
-			templ, index, field_no, data, len);
+			templ, index, field_no, data, len,
+			dict_table_is_comp(prebuilt->table));
 
 		if (heap != prebuilt->blob_heap) {
 			mem_heap_free(heap);
@@ -2998,7 +2986,7 @@ row_sel_store_mysql_field_func(
 			       (const byte*) prebuilt->default_rec
 			       + templ->mysql_col_offset,
 			       templ->mysql_col_len);
-			DBUG_RETURN(TRUE);
+			DBUG_RETURN(true);
 		}
 
 		if (DATA_LARGE_MTYPE(templ->type)
@@ -3027,7 +3015,8 @@ row_sel_store_mysql_field_func(
 
 		row_sel_field_store_in_mysql_format(
 			mysql_rec + templ->mysql_col_offset,
-			templ, index, field_no, data, len);
+			templ, index, field_no, data, len,
+			dict_table_is_comp(prebuilt->table));
 	}
 
 	ut_ad(len != UNIV_SQL_NULL);
@@ -3039,7 +3028,7 @@ row_sel_store_mysql_field_func(
 			&= ~(byte) templ->mysql_null_bit_mask;
 	}
 
-	DBUG_RETURN(TRUE);
+	DBUG_RETURN(true);
 }
 
 /** Convert a row in the Innobase format to a row in the MySQL format.
@@ -3132,7 +3121,8 @@ row_sel_store_mysql_rec(
 				row_sel_field_store_in_mysql_format(
 				mysql_rec + templ->mysql_col_offset,
 				templ, index, templ->clust_rec_field_no,
-				(const byte*)dfield->data, dfield->len);
+				(const byte*)dfield->data, dfield->len,
+				dict_table_is_comp(index->table));
 				if (templ->mysql_null_bit_mask) {
 					mysql_rec[
 					templ->mysql_null_byte_offset]
