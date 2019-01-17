@@ -48,6 +48,10 @@ MACRO (CHANGE_SSL_SETTINGS string)
 ENDMACRO()
 
 INCLUDE(ExternalProject)
+
+set(LIBRESSL_VERSION "2.7.5")
+set(LIBRESSL_HTTP_URL http://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-${LIBRESSL_VERSION}.tar.gz)
+
 MACRO (ADD_EXTERNAL_PROJECT_LIBRESSL)
   if(MSVC)
     set(LIBRESSL_EXTRA_CMAKE_FLAGS "-DCMAKE_C_FLAGS=/wd4152 /wd4701 /wd4702 /wd4090 /wd4295 /wd4132 /wd4204 /wd4206 /WX-")
@@ -57,10 +61,13 @@ MACRO (ADD_EXTERNAL_PROJECT_LIBRESSL)
   else()
     set(PIC_FLAG)
   endif()
-
-  set(LIBRESSL_VERSION "2.8.3")
-  set(LIBRESSL_URL http://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-${LIBRESSL_VERSION}.tar.gz)
   set(LIBRESSL_INSTALL_DIR "${CMAKE_CURRENT_BINARY_DIR}/thirdparty/libressl-install")
+  set(LIBRESSL_LOCAL_URL ${CMAKE_SOURCE_DIR}/thirdparty/libressl-${LIBRESSL_VERSION})
+  if(EXISTS ${LIBRESSL_LOCAL_URL})
+    set(LIBRESSL_URL ${LIBRESSL_LOCAL_URL})
+  else()
+    set(LIBRESSL_URL ${LIBRESSL_HTTP_URL})
+  endif()
   ExternalProject_Add(libressl
     URL ${LIBRESSL_URL}
     CMAKE_ARGS
