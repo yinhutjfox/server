@@ -41,9 +41,18 @@ FILE(REMOVE ${PACKAGE_DIR}.tar.gz )
 
 IF(GIT_EXECUTABLE)
   MESSAGE(STATUS "Running git checkout-index")
+
+  #Workaround a git bug (usually seen on Windows, requires space in git path)
+  STRING(FIND "${GIT_EXECUTABLE}" " " SPACE_POS)
+  IF(SPACE_POS EQUAL -1)
+    SET(GIT_EXE_NO_SPACES git)
+  ELSE()
+    SET(GIT_EXE_NO_SPACES ${GIT_EXECUTABLE})
+  ENDIF()
+
   EXECUTE_PROCESS(
     COMMAND "${GIT_EXECUTABLE}" checkout-index --all --prefix=${PACKAGE_DIR}/
-    COMMAND "${GIT_EXECUTABLE}" submodule foreach "${GIT_EXECUTABLE} checkout-index --all --prefix=${PACKAGE_DIR}/$path/"
+    COMMAND "${GIT_EXECUTABLE}" submodule foreach "${GIT_EXE_NO_SPACES} checkout-index --all --prefix=${PACKAGE_DIR}/$path/"
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     RESULT_VARIABLE RESULT
   )
@@ -55,8 +64,10 @@ ENDIF()
 CONFIGURE_FILE(${CMAKE_BINARY_DIR}/include/source_revision.h
        ${PACKAGE_DIR}/include/source_revision.h COPYONLY)
 
-CONFIGURE_FILE(${CMAKE_BINARY_DIR}/storage/rocksdb/rdb_source_revision.h
+IF(EXISTS ${CMAKE_BINARY_DIR}/storage/rocksdb/rdb_source_revision.h)
+  CONFIGURE_FILE(${CMAKE_BINARY_DIR}/storage/rocksdb/rdb_source_revision.h
        ${PACKAGE_DIR}/storage/rocksdb/rdb_source_revision.h COPYONLY)
+ENDIF()
 
 IF(NOT GIT_EXECUTABLE)
   MESSAGE(STATUS "git not found or source dir is not a repo, use CPack")
