@@ -4916,27 +4916,6 @@ public:
   }
 };
 
-inline void add_to_active_threads(THD *thd)
-{
-  mysql_mutex_lock(&LOCK_thread_count);
-  threads.append(thd);
-  mysql_mutex_unlock(&LOCK_thread_count);
-}
-
-/*
-  This should be called when you want to delete a thd that was not
-  running any queries.
-  This function will assert that the THD is linked.
-*/
-
-inline void unlink_not_visible_thd(THD *thd)
-{
-  thd->assert_linked();
-  mysql_mutex_lock(&LOCK_thread_count);
-  thd->unlink();
-  mysql_mutex_unlock(&LOCK_thread_count);
-}
-
 /** A short cut for thd->get_stmt_da()->set_ok_status(). */
 
 inline void
@@ -6838,6 +6817,90 @@ private:
   enum_binlog_format saved_binlog_format;
   THD *thd;
 };
+
+
+/** THD registry */
+class Thread_map
+{
+  I_List<THD> threads;
+  mutable mysql_mutex_t mutex;
+
+public:
+  /**
+    Constructor replacement.
+
+    Unfortunately we can't use fair constructor to initialize mutex
+    for two reasons: PFS and embedded. The former can probably be fixed,
+    the latter can probably be dropped.
+  */
+  void init()
+  {
+    mysql_mutex_init(key_Thread_map_mutex, &mutex, MY_MUTEX_INIT_FAST);
+  }
+
+  /** Destructor replacement. */
+  void destroy()
+  {
+    mysql_mutex_destroy(&mutex);
+  }
+
+  /**
+    Inserts thread to registry.
+
+    @param thd         thread
+
+    Thread becomes accessible via server_threads.
+  */
+  void insert(THD *thd)
+  {
+    mysql_mutex_lock(&mutex);
+    threads.append(thd);
+    mysql_mutex_unlock(&mutex);
+  }
+
+  /**
+    Removes thread from registry.
+
+    @param thd         thread
+
+    Thread becomes not accessible via server_threads.
+  */
+  void erase(THD *thd)
+  {
+    thd->assert_linked();
+    mysql_mutex_lock(&mutex);
+    thd->unlink();
+    mysql_mutex_unlock(&mutex);
+  }
+
+  /**
+    Iterates registered threads.
+
+    @param action      called for every element
+    @param argument    opque argument passed to action
+
+    @return
+      @retval 0 iteration completed successfully
+      @retval 1 iteration was interrupted (action returned 1)
+  */
+  int iterate(my_hash_walk_action action, void *argument)
+  {
+    int res= 0;
+    mysql_mutex_lock(&mutex);
+    I_List_iterator<THD> it(threads);
+    while (auto tmp= it++)
+      if ((res= action(tmp, argument)))
+        break;
+    mysql_mutex_unlock(&mutex);
+    return res;
+  }
+
+  /** Temporary methods, to be removed after galera4 merge. */
+  I_List<THD> &avoid_galera4_merge_conflicts() { mysql_mutex_lock(&mutex); return threads; }
+  void avoid_galera4_merge_conflicts_unlock() { mysql_mutex_unlock(&mutex); }
+};
+
+extern Thread_map server_threads;
 
 #endif /* MYSQL_SERVER */
 #endif /* SQL_CLASS_INCLUDED */

@@ -2026,7 +2026,7 @@ pthread_handler_t start_wsrep_THD(void *arg)
     goto error;
   }
 
-  mysql_mutex_lock(&LOCK_thread_count);
+  statistic_increment(thread_created,&LOCK_status);
 
   if (wsrep_gtid_mode)
   {
@@ -2035,14 +2035,13 @@ pthread_handler_t start_wsrep_THD(void *arg)
   }
 
   thd->real_id=pthread_self(); // Keep purify happy
-  thread_created++;
-  threads.append(thd);
 
   my_net_init(&thd->net,(st_vio*) 0, thd, MYF(0));
 
   DBUG_PRINT("wsrep",(("creating thread %lld"), (long long)thd->thread_id));
   thd->prior_thr_create_utime= thd->start_utime= microsecond_interval_timer();
-  (void) mysql_mutex_unlock(&LOCK_thread_count);
+
+  server_threads.insert(thd);
 
   /* from bootstrap()... */
   thd->bootstrap=1;
@@ -2124,7 +2123,7 @@ pthread_handler_t start_wsrep_THD(void *arg)
     // at server shutdown
   }
 
-  unlink_not_visible_thd(thd);
+  server_threads.erase(thd);
   delete thd;
   my_thread_end();
   return(NULL);
@@ -2190,7 +2189,7 @@ static bool have_client_connections()
 {
   THD *tmp;
 
-  I_List_iterator<THD> it(threads);
+  I_List_iterator<THD> it(server_threads.avoid_galera4_merge_conflicts());
   while ((tmp=it++))
   {
     DBUG_PRINT("quit",("Informing thread %lld that it's time to die",
@@ -2198,9 +2197,11 @@ static bool have_client_connections()
     if (is_client_connection(tmp) && tmp->killed == KILL_CONNECTION)
     {
       (void)abort_replicated(tmp);
+      server_threads.avoid_galera4_merge_conflicts_unlock();
       return true;
     }
   }
+  server_threads.avoid_galera4_merge_conflicts_unlock();
   return false;
 }
 
@@ -2226,9 +2227,8 @@ static void wsrep_close_thread(THD *thd)
 static my_bool have_committing_connections()
 {
   THD *tmp;
-  mysql_mutex_lock(&LOCK_thread_count); // For unlink from list
 
-  I_List_iterator<THD> it(threads);
+  I_List_iterator<THD> it(server_threads.avoid_galera4_merge_conflicts());
   while ((tmp=it++))
   {
     if (!is_client_connection(tmp))
@@ -2236,10 +2236,11 @@ static my_bool have_committing_connections()
 
     if (is_committing_connection(tmp))
     {
+      server_threads.avoid_galera4_merge_conflicts_unlock();
       return TRUE;
     }
   }
-  mysql_mutex_unlock(&LOCK_thread_count);
+  server_threads.avoid_galera4_merge_conflicts_unlock();
   return FALSE;
 }
 
@@ -2275,7 +2276,7 @@ void wsrep_close_client_connections(my_bool wait_to_end, THD *except_caller_thd)
   kill_cached_threads= true; // prevent future threads caching
   mysql_cond_broadcast(&COND_thread_cache); // tell cached threads to die
 
-  I_List_iterator<THD> it(threads);
+  I_List_iterator<THD> it(server_threads.avoid_galera4_merge_conflicts());
   while ((tmp=it++))
   {
     DBUG_PRINT("quit",("Informing thread %lld that it's time to die",
@@ -2312,6 +2313,7 @@ void wsrep_close_client_connections(my_bool wait_to_end, THD *except_caller_thd)
     mysql_mutex_unlock(&tmp->LOCK_thd_data);
 
   }
+  server_threads.avoid_galera4_merge_conflicts_unlock();
   mysql_mutex_unlock(&LOCK_thread_count);
 
   if (thread_count)
@@ -2322,7 +2324,7 @@ void wsrep_close_client_connections(my_bool wait_to_end, THD *except_caller_thd)
     Force remaining threads to die by closing the connection to the client
   */
 
-  I_List_iterator<THD> it2(threads);
+  I_List_iterator<THD> it2(server_threads.avoid_galera4_merge_conflicts());
   while ((tmp=it2++))
   {
 #ifndef __bsdi__				// Bug in BSDI kernel
@@ -2336,6 +2338,7 @@ void wsrep_close_client_connections(my_bool wait_to_end, THD *except_caller_thd)
     }
 #endif
   }
+  server_threads.avoid_galera4_merge_conflicts_unlock();
 
   DBUG_PRINT("quit",("Waiting for threads to die (count=%u)",thread_count));
   WSREP_DEBUG("waiting for client connections to close: %u", thread_count);
@@ -2364,9 +2367,8 @@ void wsrep_close_applier(THD *thd)
 void wsrep_close_threads(THD *thd)
 {
   THD *tmp;
-  mysql_mutex_lock(&LOCK_thread_count); // For unlink from list
 
-  I_List_iterator<THD> it(threads);
+  I_List_iterator<THD> it(server_threads.avoid_galera4_merge_conflicts());
   while ((tmp=it++))
   {
     DBUG_PRINT("quit",("Informing thread %lld that it's time to die",
@@ -2378,8 +2380,7 @@ void wsrep_close_threads(THD *thd)
       wsrep_close_thread (tmp);
     }
   }
-
-  mysql_mutex_unlock(&LOCK_thread_count);
+  server_threads.avoid_galera4_merge_conflicts_unlock();
 }
 
 void wsrep_wait_appliers_close(THD *thd)
