@@ -54,7 +54,7 @@ set(LIBRESSL_HTTP_URL http://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-${LIB
 
 MACRO (ADD_EXTERNAL_PROJECT_LIBRESSL)
   if(MSVC)
-    set(LIBRESSL_EXTRA_CMAKE_FLAGS "-DCMAKE_C_FLAGS=/wd4152 /wd4701 /wd4702 /wd4090 /wd4295 /wd4132 /wd4204 /wd4206 /WX-")
+    set(LIBRESSL_EXTRA_CMAKE_C_FLAGS " /wd4152 /wd4701 /wd4702 /wd4090 /wd4295 /wd4132 /wd4204 /wd4206")
   endif()
   if(UNIX)
     set(PIC_FLAG -fPIC)
@@ -68,31 +68,70 @@ MACRO (ADD_EXTERNAL_PROJECT_LIBRESSL)
   else()
     set(LIBRESSL_URL ${LIBRESSL_HTTP_URL})
   endif()
-  if(GENERATOR_IS_MULTI_CONFIG)
-    SET(CFLAGS_ARG 
-    "-DCMAKE_C_FLAGS_DEBUG=${CMAKE_C_FLAGS_DEBUG} ${PIC_FLAG} ${LIBRESSL_EXTRA_CMAKE_FLAGS}"
-    "-DCMAKE_C_FLAGS_RELWITHDEBINFO=${CMAKE_C_FLAGS_RELWITHDEBINFO} ${PIC_FLAG} ${LIBRESSL_EXTRA_CMAKE_FLAGS}"
-    "-DCMAKE_C_FLAGS_RELEASE=${CMAKE_C_FLAGS_RELEASE} ${PIC_FLAG} ${LIBRESSL_EXTRA_CMAKE_FLAGS}"
-    "-DCMAKE_C_FLAGS_MINSIZEREL=${CMAKE_C_FLAGS_MINSIZEREL} ${PIC_FLAG} ${LIBRESSL_EXTRA_CMAKE_FLAGS}")
+  get_property(_GENERATOR_IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+  if(_GENERATOR_IS_MULTI_CONFIG)
+    SET(flags 
+     CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELWITHDEBINFO CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
+     CMAKE_C_FLAGS
+     )
   else()
-    SET(CFLAGS_ARG "-DCMAKE_C_FLAGS=${CMAKE_C_FLAGS} ${PIC_FLAG} ${LIBRESSL_EXTRA_CMAKE_FLAGS}")
+    SET(flags CMAKE_C_FLAGS)
   endif()
+  set(CFLAGS_ARG)
+  foreach(f ${flags})
+    set(name ${f})
+    set(val ${${f}})
+    if(MSVC)
+      string(REGEX REPLACE "/we[0-9]+" "" "val" ${val})
+      string(REGEX REPLACE "[/-]WX" "" "val" "${val}")
+      string(REGEX REPLACE "[/-]Werror" "" "val" "${val}")
+	  string(REGEX REPLACE "/DWIN32 /D_WINDOWS /W3" "" "val" "${val}")
+    else()
+      string(REGEX REPLACE "-Werror" "" "val" "${val}")
+    endif()
+	IF(MSVC AND (CMAKE_CXX_COMPILER_ID MATCHES Clang))
+	  MESSAGE("CLANG_CL_FLAGS= ${CLANG_CL_FLAGS}")
+	  string(REPLACE "${CLANG_CL_FLAGS}" "" "val" "${val}")
+	ENDIF()
+    list(APPEND CFLAGS_ARG "-D${name}=${val}${LIBRESSL_EXTRA_${name}}")
+  endforeach()
+  IF(MSVC)
+    SET(PATCH_COMMAND PATCH_COMMAND
+     ${CMAKE_COMMAND} -E chdir
+     ${CMAKE_CURRENT_BINARY_DIR}/thirdparty/libressl-prefix/src/libressl/include/openssl
+     powershell -Command "(gc x509.h) -replace '#pragma message', '//#pragma message' | Out-File -Encoding ASCII  x509.h")
+  ENDIF()
+  
+  set(byproducts)
+  foreach(lib crypto ssl)
+    add_library(${lib} STATIC IMPORTED)
+	set(loc "${LIBRESSL_INSTALL_DIR}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${lib}${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    set_target_properties(${lib} PROPERTIES IMPORTED_LOCATION ${loc})
+    if(CMAKE_VERSION VERSION_GREATER "3.1")
+      SET(byproducts ${byproducts} BUILD_BYPRODUCTS ${loc})
+    endif()
+    add_dependencies(${lib} libressl)
+  endforeach()
+  IF(MSVC AND (CMAKE_CXX_COMPILER_ID MATCHES Clang) AND (NOT CMAKE_GENERATOR MATCHES "Visual Studio"))
+   # workaround a bug
+   list(APPEND CFLAGS_ARG "-DCMAKE_C_COMPILER=cl" "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
+  ENDIF()
   ExternalProject_Add(libressl
     PREFIX "thirdparty/libressl-prefix"
     URL ${LIBRESSL_URL}
+    ${PATCH_COMMAND}
+	${byproducts}
     CMAKE_ARGS
     -Wno-dev
     "-DLIBRESSL_TESTS=OFF"
     "-DLIBRESSL_APPS=OFF"
     "-DCMAKE_INSTALL_PREFIX=${LIBRESSL_INSTALL_DIR}"
-    ${CFLAGS_ARG} 
+	${CFLAGS_ARG}
+	${LIBRESSL_CMAKE_CONFIG}
+	${LIBRESSL_CMAKE_GENERATOR}
+	${LIBRESSL_CMAKE_BUILD_COMMAND}
   )
-  foreach(lib crypto ssl)
-    add_library(${lib} STATIC IMPORTED)
-    set_target_properties(${lib} PROPERTIES IMPORTED_LOCATION 
-      "${LIBRESSL_INSTALL_DIR}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${lib}${CMAKE_STATIC_LIBRARY_SUFFIX}")
-    add_dependencies(${lib} libressl)
-  endforeach()
+
   if (LIBRT)
     set_target_properties(crypto PROPERTIES INTERFACE_LINK_LIBRARIES  ${LIBRT})
   endif()
@@ -111,6 +150,8 @@ MACRO (ADD_EXTERNAL_PROJECT_LIBRESSL)
   set(OPENSSL_ROOT_DIR  "${LIBRESSL_INSTALL_DIR}" CACHE BOOL "")
   set(OPENSSL_INCLUDE_DIR "${LIBRESSL_INSTALL_DIR}/include" CACHE STRING "")
   set(OPENSSL_LIBRARIES ssl crypto ${LIBRT}  CACHE STRING "")
+  set(HAVE_EVP_aes_128_ctr  TRUE CACHE  BOOL "")
+  set(HAVE_EVP_aes_128_ctr  TRUE CACHE  BOOL "")
   set(SSL_LIBRARIES ${OPENSSL_LIBRARIES} CACHE STRING "")
   set(SSL_INCLUDE_DIRS ${OPENSSL_INCLUDE_DIR})
   set(SSL_INTERNAL_INCLUDE_DIRS "")
