@@ -398,20 +398,6 @@ uint volatile global_disable_checkpoint;
 #if defined(_WIN32) && !defined(EMBEDDED_LIBRARY)
 ulong slow_start_timeout;
 #endif
-/*
-  True if the bootstrap thread is running. Protected by LOCK_start_thread.
-  Used in bootstrap() function to determine if the bootstrap thread
-  has completed. Note, that we can't use 'thread_count' instead,
-  since in 5.1, in presence of the Event Scheduler, there may be
-  event threads running in parallel, so it's impossible to know
-  what value of 'thread_count' is a sign of completion of the
-  bootstrap thread.
-
-  At the same time, we can't start the event scheduler after
-  bootstrap either, since we want to be able to process event-related
-  SQL commands in the init file and in --bootstrap mode.
-*/
-bool volatile in_bootstrap= FALSE;
 /**
    @brief 'grant_option' is used to indicate if privileges needs
    to be checked, in which case the lock, LOCK_grant, is used
@@ -734,7 +720,6 @@ mysql_mutex_t LOCK_thread_count;
   other threads.
 
   It also protects these variables:
-  in_bootstrap
   select_thread_in_use
   slave_init_thread_running
   check_temp_dir() call
@@ -6323,6 +6308,9 @@ int mysqld_main(int argc, char **argv)
 
 static void bootstrap(MYSQL_FILE *file)
 {
+#ifndef EMBEDDED_LIBRARY
+  pthread_t t;
+#endif
   DBUG_ENTER("bootstrap");
 
   THD *thd= new THD(next_thread_id());
@@ -6333,15 +6321,11 @@ static void bootstrap(MYSQL_FILE *file)
   my_net_init(&thd->net,(st_vio*) 0, thd, MYF(0));
   thd->max_client_packet_length= thd->net.max_packet;
   thd->security_ctx->master_access= ~(ulong)0;
-  in_bootstrap= TRUE;
 
   bootstrap_file=file;
 #ifndef EMBEDDED_LIBRARY			// TODO:  Enable this
-  int error;
-  if ((error= mysql_thread_create(key_thread_bootstrap,
-                                  &thd->real_id, &connection_attrib,
-                                  handle_bootstrap,
-                                  (void*) thd)))
+  if (int error= mysql_thread_create(key_thread_bootstrap, &t, 0,
+                                     handle_bootstrap, (void*) thd))
   {
     sql_print_warning("Can't create thread to handle bootstrap (errno= %d)",
                       error);
@@ -6349,11 +6333,7 @@ static void bootstrap(MYSQL_FILE *file)
     delete thd;
     DBUG_VOID_RETURN;
   }
-  /* Wait for thread to die */
-  mysql_mutex_lock(&LOCK_thread_count);
-  while (in_bootstrap)
-    mysql_cond_wait(&COND_thread_count, &LOCK_thread_count);
-  mysql_mutex_unlock(&LOCK_thread_count);
+  pthread_join(t, 0);
 #else
   thd->mysql= 0;
   do_handle_bootstrap(thd);

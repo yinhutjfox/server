@@ -1121,11 +1121,6 @@ void do_handle_bootstrap(THD *thd)
 end:
   delete thd;
 
-  mysql_mutex_lock(&LOCK_thread_count);
-  in_bootstrap = FALSE;
-  mysql_cond_broadcast(&COND_thread_count);
-  mysql_mutex_unlock(&LOCK_thread_count);
-
 #ifndef EMBEDDED_LIBRARY
   my_thread_end();
   pthread_exit(0);
